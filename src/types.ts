@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.9";
+export const PACKAGE_VERSION = "0.1.10";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 

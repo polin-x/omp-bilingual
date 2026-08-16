@@ -20,6 +20,8 @@ export default function bilingual(pi: ExtensionAPI): void {
   let thinkingTimer: unknown;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
+  let sessionIsIdle: (() => boolean) | undefined;
+  let pendingTextCard: { pairs: Pair[]; backend: Backend } | undefined;
 
   const rememberZh = (en: string, zh: string) => {
     paraZh.set(en, zh);
@@ -74,6 +76,35 @@ export default function bilingual(pi: ExtensionAPI): void {
     });
   };
 
+  const postTextCard = () => {
+    const card = pendingTextCard;
+    pendingTextCard = undefined;
+    if (!card || card.pairs.length === 0) return;
+    pi.sendMessage(
+      {
+        customType: CUSTOM_TYPE,
+        content: card.pairs.map((p) => p.zh).join("\n\n"),
+        display: true,
+        attribution: "agent",
+        details: { pairs: card.pairs, backend: card.backend },
+      },
+      { triggerTurn: false },
+    );
+  };
+
+  const scheduleTextCard = () => {
+    const tick = () => {
+      if (!pendingTextCard) return;
+      if (!sessionIsIdle || sessionIsIdle()) {
+        postTextCard();
+        return;
+      }
+      if (scheduleTimer) scheduleTimer(tick, 150);
+      else postTextCard();
+    };
+    tick();
+  };
+
   pi.registerAssistantThinkingRenderer((context, theme) => {
     if (!liveConfig.enabled || !liveConfig.translateThinking) return undefined;
     const { closed, open } = partitionTranslatableParagraphs(context.text);
@@ -102,6 +133,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
     liveConfig = await loadConfig();
+    sessionIsIdle = () => ctx.isIdle();
     ctx.ui.setStatus("bilingual", barStatus(liveConfig));
   });
 
@@ -120,26 +152,24 @@ export default function bilingual(pi: ExtensionAPI): void {
       .map((s) => s.text);
     if (texts.length === 0) return;
     try {
-      const pairs = await translateFresh(texts);
-      if (pairs.length === 0) return;
-      pi.sendMessage(
-        {
-          customType: CUSTOM_TYPE,
-          content: pairs.map((p) => p.zh).join("\n\n"),
-          display: true,
-          attribution: "agent",
-          details: {
-            pairs: pairs.map((p) => ({ ...p, kind: "text" as const })),
-            backend: liveConfig.backend,
-          },
-        },
-        { triggerTurn: false },
-      );
+      await translateFresh(texts);
     } catch (err) {
       pi.logger.error("bilingual text translate failed", {
         err: err instanceof Error ? err.message : String(err),
       });
     }
+    const pairs: Pair[] = [];
+    for (const en of texts) {
+      const zh = paraZh.get(en);
+      if (zh) pairs.push({ en, zh, kind: "text" });
+    }
+    if (pairs.length === 0) return;
+    pendingTextCard = { pairs, backend: liveConfig.backend };
+    scheduleTextCard();
+  });
+
+  pi.on("agent_end", () => {
+    scheduleTextCard();
   });
 
   pi.registerCommand("bilingual", {
