@@ -45,56 +45,35 @@ omp plugin link /path/to/omp-bilingual
 
 然后**重开 omp 会话**。扩展模块不会被 `/reload-plugins` 热加载。状态栏应出现 `译:google (free)`。
 
-```bash
-omp plugin disable omp-bilingual
-omp plugin enable omp-bilingual
-```
-
 ## 操作
 
 ```
 /bilingual on
 /bilingual off
+/bilingual status
+/bilingual configure
 /bilingual google
 /bilingual deepseek
 /bilingual hunyuan
-/bilingual target zh-CN
-/bilingual status
 ```
 
-`/bilingual` 写入 `~/.omp/agent/omp-bilingual.json`（`PI_CODING_AGENT_DIR` 会改这个目录）。
+`/bilingual configure` 用 TUI 选开关、后端、密钥、模型、混元 Base URL。密钥和模型写到 `~/.omp/agent/omp-bilingual.json`，**不读环境变量**。
 
-```bash
-omp plugin config set omp-bilingual backend deepseek
-omp plugin config set omp-bilingual deepseekApiKey sk-...
-omp plugin config list omp-bilingual
-```
+已有密钥时，密钥输入框留空表示保持不变。模型可选预设或 `custom` 手输。
 
 ### 翻译源
 
 **Google（默认）**  
-无需 key。走 `translate.googleapis.com`，机翻，专有名词可能不准。
+无需 key。走 `translate.googleapis.com`。`configure` 里可改 target（默认 `zh-CN`）。
 
-**DeepSeek**
+**DeepSeek**  
+`configure` 里填 API key，模型默认 `deepseek-v4-flash`，也可选 `deepseek-v4-pro` 或自定义。
 
-```bash
-export DEEPSEEK_API_KEY=sk-...
-/bilingual deepseek
-```
+**腾讯混元**  
+`configure` 里填 key。Base URL 可选官方 `https://api.hunyuan.cloud.tencent.com/v1` 或 TokenHub `https://tokenhub.tencentmaas.com/v1`，模型可选 `hunyuan-turbos-latest` / `hy3` 或自定义。
 
-默认模型 `deepseek-v4-flash`。
+不要把 json 里的 key 提交进 git。
 
-**腾讯混元**
-
-```bash
-export HUNYUAN_API_KEY=...
-/bilingual hunyuan
-```
-
-默认 `https://api.hunyuan.cloud.tencent.com/v1` + `hunyuan-turbos-latest`。  
-TokenHub：`TOKENHUB_API_KEY`，`hunyuanBaseUrl` 改成 `https://tokenhub.tencentmaas.com/v1`，模型例如 `hy3`。
-
-密钥优先读环境变量，其次本地 json，再其次 `omp plugin config`。不要把 key 提交进 git。
 
 ## 已知限制
 

@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
+import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, fingerprintParagraphs, splitTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
@@ -79,6 +80,18 @@ export default function bilingual(pi: ExtensionAPI): void {
       return matches.length > 0 ? matches : null;
     },
     handler: async (args, ctx) => {
+      const first = args.trim().split(/\s+/)[0] ?? "";
+      if (first === "configure" || first === "config") {
+        if (!ctx.hasUI) {
+          ctx.ui.notify("/bilingual configure needs the TUI", "warning");
+          return;
+        }
+        const next = await runConfigure(ctx);
+        if (!next) return;
+        ctx.ui.setStatus("bilingual", next.enabled ? `译:${describeBackend(next.backend)}` : "译:off");
+        ctx.ui.notify(statusLine(next), "info");
+        return;
+      }
       const next = await applyCommand(args.trim());
       if (typeof next === "string") {
         ctx.ui.notify(next, "info");
@@ -91,7 +104,6 @@ export default function bilingual(pi: ExtensionAPI): void {
       ctx.ui.notify(statusLine(next), "info");
     },
   });
-
 }
 
 async function translateAssistant(
@@ -169,11 +181,11 @@ function isContinuableAssistant(message: object): boolean {
 const SUBCOMMANDS = [
   { name: "on", description: "Enable bilingual cards" },
   { name: "off", description: "Disable bilingual cards" },
-  { name: "status", description: "Show backend and on/off state" },
-  { name: "google", description: "Use free Google Translate" },
-  { name: "deepseek", description: "Use DeepSeek (needs DEEPSEEK_API_KEY)" },
-  { name: "hunyuan", description: "Use Tencent Hunyuan (needs HUNYUAN_API_KEY)" },
-  { name: "target", description: "Set Google target language, e.g. zh-CN" },
+  { name: "status", description: "Show backend, model, and on/off" },
+  { name: "configure", description: "Open TUI to set backend, key, and model" },
+  { name: "google", description: "Switch to free Google Translate" },
+  { name: "deepseek", description: "Switch to DeepSeek (configure key first)" },
+  { name: "hunyuan", description: "Switch to Hunyuan (configure key first)" },
 ];
 async function applyCommand(args: string): Promise<PluginConfig | string> {
   const [cmd = "", ...rest] = args.split(/\s+/).filter(Boolean);
@@ -197,14 +209,19 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
   }
   return [
     "用法:",
-    "  /bilingual on|off",
+    "  /bilingual on|off|status",
+    "  /bilingual configure",
     "  /bilingual google|deepseek|hunyuan",
-    "  /bilingual target zh-CN",
-    "  /bilingual status",
   ].join("\n");
 }
 
 function statusLine(config: PluginConfig): string {
   const on = config.enabled ? "on" : "off";
-  return `bilingual ${on} · ${describeBackend(config.backend)} · ${config.target}`;
+  if (config.backend === "deepseek") {
+    return `bilingual ${on} · deepseek · ${config.deepseekModel}${config.deepseekApiKey ? "" : " · no key"}`;
+  }
+  if (config.backend === "hunyuan") {
+    return `bilingual ${on} · hunyuan · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"}`;
+  }
+  return `bilingual ${on} · google · ${config.target}`;
 }

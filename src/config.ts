@@ -30,14 +30,9 @@ export async function loadConfig(): Promise<PluginConfig> {
     enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_CONFIG.enabled,
     backend: asBackend(merged.backend),
     target: asString(merged.target, DEFAULT_CONFIG.target),
-    deepseekApiKey:
-      env("DEEPSEEK_API_KEY") || asString(merged.deepseekApiKey, "") || DEFAULT_CONFIG.deepseekApiKey,
+    deepseekApiKey: asString(merged.deepseekApiKey, DEFAULT_CONFIG.deepseekApiKey),
     deepseekModel: asString(merged.deepseekModel, DEFAULT_CONFIG.deepseekModel),
-    hunyuanApiKey:
-      env("HUNYUAN_API_KEY") ||
-      env("TOKENHUB_API_KEY") ||
-      asString(merged.hunyuanApiKey, "") ||
-      DEFAULT_CONFIG.hunyuanApiKey,
+    hunyuanApiKey: asString(merged.hunyuanApiKey, DEFAULT_CONFIG.hunyuanApiKey),
     hunyuanBaseUrl: asString(merged.hunyuanBaseUrl, DEFAULT_CONFIG.hunyuanBaseUrl),
     hunyuanModel: asString(merged.hunyuanModel, DEFAULT_CONFIG.hunyuanModel),
   };
@@ -66,9 +61,6 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   }
 }
 
-function env(name: string): string {
-  return process.env[name]?.trim() ?? "";
-}
 
 function asString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;

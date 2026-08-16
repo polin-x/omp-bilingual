@@ -27,8 +27,7 @@
       "deepseekApiKey": {
         "type": "string",
         "secret": true,
-        "env": "DEEPSEEK_API_KEY",
-        "description": "DeepSeek API key"
+        "description": "DeepSeek API key (set via /bilingual configure)"
       },
       "deepseekModel": {
         "type": "string",
@@ -38,8 +37,7 @@
       "hunyuanApiKey": {
         "type": "string",
         "secret": true,
-        "env": "HUNYUAN_API_KEY",
-        "description": "Tencent Hunyuan / TokenHub API key"
+        "description": "Hunyuan / TokenHub API key (set via /bilingual configure)"
       },
       "hunyuanBaseUrl": {
         "type": "string",
