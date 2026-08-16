@@ -1,96 +1,142 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import type { Backend, PluginConfig } from "./types.ts";
-import { TARGET_LANGUAGES } from "./types.ts";
+import { TARGET_LANGUAGES, languageName } from "./types.ts";
 
 export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig | undefined> {
   if (!ctx.hasUI) return undefined;
-  const current = await loadConfig();
+  let cfg = await loadConfig();
 
-  const enabled = await ctx.ui.select("Bilingual", [
-    { label: "on", description: "Translate English replies" },
-    { label: "off", description: "Leave replies unchanged" },
-  ]);
-  if (enabled === undefined) return undefined;
-
-  const backend = await pickBackend(ctx, current.backend);
-  if (backend === undefined) return undefined;
-
-  const target = await pickOrType(ctx, "Target language", current.target, [
-    ...TARGET_LANGUAGES.map((l) => ({ label: l.code, description: l.name })),
-  ]);
-  if (target === undefined) return undefined;
-
-  const sourceLang = await pickOrType(ctx, "Source language", current.sourceLang, [
-    { label: "auto", description: "Detect" },
-    { label: "en", description: "English" },
-    { label: "zh-CN", description: "Simplified Chinese" },
-    { label: "ja", description: "Japanese" },
-    { label: "ko", description: "Korean" },
-  ]);
-  if (sourceLang === undefined) return undefined;
-
-  const thinking = await ctx.ui.select("Translate thinking", [
-    { label: "on", description: current.translateThinking ? "Current" : "Show translation under thinking" },
-    { label: "off", description: current.translateThinking ? "Skip thinking blocks" : "Current" },
-  ]);
-  if (thinking === undefined) return undefined;
-
-  const debounceRaw = await pickOrType(ctx, "Thinking debounce (ms)", String(current.thinkingDebounceMs), [
-    { label: "1000", description: "Faster, more requests" },
-    { label: "2000", description: "Default" },
-    { label: "3000", description: "Fewer requests" },
-    { label: "5000", description: "Wait longer after thinking settles" },
-  ]);
-  if (debounceRaw === undefined) return undefined;
-  const thinkingDebounceMs = Number.parseInt(debounceRaw, 10);
-
-  const common = {
-    enabled: enabled === "on",
-    backend,
-    target,
-    sourceLang,
-    translateThinking: thinking === "on",
-    thinkingDebounceMs: Number.isFinite(thinkingDebounceMs) ? thinkingDebounceMs : current.thinkingDebounceMs,
-  };
-
-  if (backend === "google") {
-    return patchConfig(common);
+  for (;;) {
+    const item = await ctx.ui.select("Bilingual settings", [
+      { label: "done", description: summarize(cfg) },
+      { label: "enabled", description: cfg.enabled ? "on" : "off" },
+      { label: "backend", description: cfg.backend },
+      { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
+      { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
+      { label: "provider", description: providerHint(cfg) },
+      { label: "more", description: `source ${cfg.sourceLang} · debounce ${cfg.thinkingDebounceMs}ms` },
+    ]);
+    if (item === undefined) return undefined;
+    if (item === "done") return patchConfig(cfg);
+    const next = await editItem(ctx, cfg, item);
+    if (next) cfg = next;
   }
+}
 
-  if (backend === "deepseek") {
-    const apiKey = await promptSecret(ctx, "DeepSeek API key", current.deepseekApiKey);
+async function editItem(
+  ctx: ExtensionContext,
+  cfg: PluginConfig,
+  item: string,
+): Promise<PluginConfig | undefined> {
+  if (item === "enabled") {
+    const v = await ctx.ui.select("Enabled", [
+      { label: "on", description: "Translate English replies" },
+      { label: "off", description: "Leave replies unchanged" },
+    ]);
+    if (v === undefined) return undefined;
+    return { ...cfg, enabled: v === "on" };
+  }
+  if (item === "backend") {
+    const backend = await pickBackend(ctx, cfg.backend);
+    if (backend === undefined) return undefined;
+    return { ...cfg, backend };
+  }
+  if (item === "target") {
+    const target = await pickOrType(
+      ctx,
+      "Target language",
+      cfg.target,
+      TARGET_LANGUAGES.map((l) => ({ label: l.code, description: l.name })),
+    );
+    if (target === undefined) return undefined;
+    return { ...cfg, target };
+  }
+  if (item === "thinking") {
+    const v = await ctx.ui.select("Translate thinking", [
+      { label: "on", description: "Show translation under thinking" },
+      { label: "off", description: "Skip thinking blocks" },
+    ]);
+    if (v === undefined) return undefined;
+    return { ...cfg, translateThinking: v === "on" };
+  }
+  if (item === "provider") return editProvider(ctx, cfg);
+  if (item === "more") return editMore(ctx, cfg);
+  return undefined;
+}
+
+async function editProvider(ctx: ExtensionContext, cfg: PluginConfig): Promise<PluginConfig | undefined> {
+  if (cfg.backend === "google") {
+    ctx.ui.notify("Google needs no API key", "info");
+    return cfg;
+  }
+  if (cfg.backend === "deepseek") {
+    const apiKey = await promptSecret(ctx, "DeepSeek API key", cfg.deepseekApiKey);
     if (apiKey === undefined) return undefined;
-    const model = await pickOrType(ctx, "DeepSeek model", current.deepseekModel, [
+    const model = await pickOrType(ctx, "DeepSeek model", cfg.deepseekModel, [
       { label: "deepseek-v4-flash", description: "Default, cheaper" },
       { label: "deepseek-v4-pro", description: "Stronger" },
     ]);
     if (model === undefined) return undefined;
-    return patchConfig({
-      ...common,
-      deepseekApiKey: apiKey,
-      deepseekModel: model,
-    });
+    return { ...cfg, deepseekApiKey: apiKey, deepseekModel: model };
   }
-
-  const apiKey = await promptSecret(ctx, "Hunyuan / TokenHub API key", current.hunyuanApiKey);
+  const apiKey = await promptSecret(ctx, "Hunyuan / TokenHub API key", cfg.hunyuanApiKey);
   if (apiKey === undefined) return undefined;
-  const baseUrl = await pickOrType(ctx, "Hunyuan base URL", current.hunyuanBaseUrl, [
+  const baseUrl = await pickOrType(ctx, "Hunyuan base URL", cfg.hunyuanBaseUrl, [
     { label: "https://api.hunyuan.cloud.tencent.com/v1", description: "Official Hunyuan" },
     { label: "https://tokenhub.tencentmaas.com/v1", description: "TokenHub CN" },
   ]);
   if (baseUrl === undefined) return undefined;
-  const model = await pickOrType(ctx, "Hunyuan model", current.hunyuanModel, [
+  const model = await pickOrType(ctx, "Hunyuan model", cfg.hunyuanModel, [
     { label: "hunyuan-turbos-latest", description: "Official default" },
     { label: "hy3", description: "TokenHub" },
   ]);
   if (model === undefined) return undefined;
-  return patchConfig({
-    ...common,
-    hunyuanApiKey: apiKey,
-    hunyuanBaseUrl: baseUrl,
-    hunyuanModel: model,
-  });
+  return { ...cfg, hunyuanApiKey: apiKey, hunyuanBaseUrl: baseUrl, hunyuanModel: model };
+}
+
+async function editMore(ctx: ExtensionContext, cfg: PluginConfig): Promise<PluginConfig | undefined> {
+  const item = await ctx.ui.select("More", [
+    { label: "back", description: "Return" },
+    { label: "source", description: cfg.sourceLang },
+    { label: "debounce", description: `${cfg.thinkingDebounceMs}ms` },
+  ]);
+  if (item === undefined || item === "back") return undefined;
+  if (item === "source") {
+    const sourceLang = await pickOrType(ctx, "Source language", cfg.sourceLang, [
+      { label: "auto", description: "Detect" },
+      { label: "en", description: "English" },
+      { label: "zh-CN", description: "Simplified Chinese" },
+      { label: "ja", description: "Japanese" },
+      { label: "ko", description: "Korean" },
+    ]);
+    if (sourceLang === undefined) return undefined;
+    return { ...cfg, sourceLang };
+  }
+  const raw = await pickOrType(ctx, "Thinking debounce (ms)", String(cfg.thinkingDebounceMs), [
+    { label: "1000", description: "Faster" },
+    { label: "2000", description: "Default" },
+    { label: "3000", description: "Fewer requests" },
+    { label: "5000", description: "Wait longer" },
+  ]);
+  if (raw === undefined) return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return undefined;
+  return { ...cfg, thinkingDebounceMs: n };
+}
+
+function summarize(cfg: PluginConfig): string {
+  const on = cfg.enabled ? "on" : "off";
+  const think = cfg.translateThinking ? "thinking" : "no-thinking";
+  return `${on} · ${cfg.backend} · ${cfg.target} · ${think}`;
+}
+
+function providerHint(cfg: PluginConfig): string {
+  if (cfg.backend === "google") return "no key";
+  if (cfg.backend === "deepseek") {
+    return `${cfg.deepseekModel}${cfg.deepseekApiKey ? "" : " · no key"}`;
+  }
+  return `${cfg.hunyuanModel}${cfg.hunyuanApiKey ? "" : " · no key"}`;
 }
 
 async function pickBackend(ctx: ExtensionContext, current: Backend): Promise<Backend | undefined> {
