@@ -4,7 +4,7 @@ import { runConfigure } from "./configure.ts";
 import { partitionTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
-import { CUSTOM_TYPE, PACKAGE_VERSION, type Backend, type Pair, type PluginConfig } from "./types.ts";
+import { CUSTOM_TYPE, DEFAULT_CONFIG, PACKAGE_VERSION, type Backend, type Pair, type PluginConfig } from "./types.ts";
 
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
@@ -14,7 +14,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   const paraZh = new Map<string, string>();
   const paraFailed = new Set<string>();
   const paraBusy = new Set<string>();
-  const THINKING_DEBOUNCE_MS = 2000;
+  let liveConfig: PluginConfig = DEFAULT_CONFIG;
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
   let thinkingTimer: unknown;
@@ -75,6 +75,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   };
 
   pi.registerAssistantThinkingRenderer((context, theme) => {
+    if (!liveConfig.enabled || !liveConfig.translateThinking) return undefined;
     const { closed, open } = partitionTranslatableParagraphs(context.text);
     const paras = open ? [...closed, open] : closed;
     if (paras.length === 0) return undefined;
@@ -89,7 +90,7 @@ export default function bilingual(pi: ExtensionAPI): void {
       cancelTimer?.(thinkingTimer);
       thinkingTimer = undefined;
     }
-    thinkingTimer = scheduleTimer(flushThinkingTranslate, THINKING_DEBOUNCE_MS);
+    thinkingTimer = scheduleTimer(flushThinkingTranslate, liveConfig.thinkingDebounceMs);
     return view;
   });
 
@@ -100,8 +101,8 @@ export default function bilingual(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
-    const config = await loadConfig();
-    ctx.ui.setStatus("bilingual", barStatus(config));
+    liveConfig = await loadConfig();
+    ctx.ui.setStatus("bilingual", barStatus(liveConfig));
   });
 
   pi.on("message_end", (event) => {
@@ -115,7 +116,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("bilingual", {
-    description: "Toggle or configure paragraph bilingual cards",
+    description: "Toggle or open bilingual settings",
     getArgumentCompletions(argumentPrefix: string) {
       if (argumentPrefix.includes(" ")) return null;
       const lower = argumentPrefix.toLowerCase();
@@ -128,13 +129,14 @@ export default function bilingual(pi: ExtensionAPI): void {
     },
     handler: async (args, ctx) => {
       const first = args.trim().split(/\s+/)[0] ?? "";
-      if (first === "configure" || first === "config") {
+      if (first === "settings" || first === "configure" || first === "config") {
         if (!ctx.hasUI) {
-          ctx.ui.notify("/bilingual configure needs the TUI", "warning");
+          ctx.ui.notify("/bilingual settings needs the TUI", "warning");
           return;
         }
         const next = await runConfigure(ctx);
         if (!next) return;
+        liveConfig = next;
         ctx.ui.setStatus("bilingual", barStatus(next));
         ctx.ui.notify(statusLine(next), "info");
         return;
@@ -144,6 +146,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         ctx.ui.notify(next, "info");
         return;
       }
+      liveConfig = next;
       ctx.ui.setStatus("bilingual", barStatus(next));
       ctx.ui.notify(statusLine(next), "info");
     },
@@ -153,15 +156,16 @@ export default function bilingual(pi: ExtensionAPI): void {
 
 
 const SUBCOMMANDS = [
-  { name: "on", description: "Enable bilingual cards" },
-  { name: "off", description: "Disable bilingual cards" },
-  { name: "status", description: "Show backend, model, version, and on/off" },
+  { name: "settings", description: "Open TUI settings: language, backend, key, thinking" },
+  { name: "on", description: "Enable translation" },
+  { name: "off", description: "Disable translation" },
+  { name: "status", description: "Show backend, target, model, version" },
   { name: "version", description: "Show installed plugin version" },
-  { name: "update", description: "How to upgrade this plugin" },
-  { name: "configure", description: "Open TUI to set backend, key, and model" },
+  { name: "target", description: "Set target language, e.g. /bilingual target ja" },
   { name: "google", description: "Switch to free Google Translate" },
-  { name: "deepseek", description: "Switch to DeepSeek (configure key first)" },
-  { name: "hunyuan", description: "Switch to Hunyuan (configure key first)" },
+  { name: "deepseek", description: "Switch to DeepSeek (set key in settings first)" },
+  { name: "hunyuan", description: "Switch to Hunyuan (set key in settings first)" },
+  { name: "update", description: "How to upgrade this plugin" },
 ];
 async function applyCommand(args: string): Promise<PluginConfig | string> {
   const [cmd = "", ...rest] = args.split(/\s+/).filter(Boolean);
@@ -188,29 +192,32 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
   }
   if (cmd === "target") {
     const value = rest[0];
-    if (!value) return "用法: /bilingual target zh-CN";
+    if (!value) return "用法: /bilingual target zh-CN|ja|en|…";
     return patchConfig({ target: value });
   }
   return [
     "用法:",
+    "  /bilingual settings",
     "  /bilingual on|off|status|version|update",
-    "  /bilingual configure",
+    "  /bilingual target zh-CN|ja|en|…",
     "  /bilingual google|deepseek|hunyuan",
   ].join("\n");
 }
 
 function barStatus(config: PluginConfig): string {
   if (!config.enabled) return `译:off ${PACKAGE_VERSION}`;
-  return `译:${describeBackend(config.backend)} ${PACKAGE_VERSION}`;
+  return `译:${describeBackend(config.backend)} ${config.target} ${PACKAGE_VERSION}`;
 }
 
 function statusLine(config: PluginConfig): string {
   const on = config.enabled ? "on" : "off";
+  const think = config.translateThinking ? "thinking" : "no-thinking";
   if (config.backend === "deepseek") {
-    return `bilingual ${PACKAGE_VERSION} ${on} · deepseek · ${config.deepseekModel}${config.deepseekApiKey ? "" : " · no key"}`;
+    return `bilingual ${PACKAGE_VERSION} ${on} · deepseek · ${config.target} · ${config.deepseekModel}${config.deepseekApiKey ? "" : " · no key"} · ${think}`;
   }
   if (config.backend === "hunyuan") {
-    return `bilingual ${PACKAGE_VERSION} ${on} · hunyuan · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"}`;
+    return `bilingual ${PACKAGE_VERSION} ${on} · hunyuan · ${config.target} · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"} · ${think}`;
   }
-  return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.target}`;
+  return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.sourceLang}→${config.target} · ${think}`;
 }
+

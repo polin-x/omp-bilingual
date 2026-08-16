@@ -30,6 +30,12 @@ export async function loadConfig(): Promise<PluginConfig> {
     enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_CONFIG.enabled,
     backend: asBackend(merged.backend),
     target: asString(merged.target, DEFAULT_CONFIG.target),
+    sourceLang: asString(merged.sourceLang, DEFAULT_CONFIG.sourceLang),
+    translateThinking:
+      typeof merged.translateThinking === "boolean"
+        ? merged.translateThinking
+        : DEFAULT_CONFIG.translateThinking,
+    thinkingDebounceMs: asDebounceMs(merged.thinkingDebounceMs),
     deepseekApiKey: asString(merged.deepseekApiKey, DEFAULT_CONFIG.deepseekApiKey),
     deepseekModel: asString(merged.deepseekModel, DEFAULT_CONFIG.deepseekModel),
     hunyuanApiKey: asString(merged.hunyuanApiKey, DEFAULT_CONFIG.hunyuanApiKey),
@@ -67,4 +73,10 @@ function asString(value: unknown, fallback: string): string {
 }
 function asBackend(value: unknown): Backend {
   return value === "deepseek" || value === "hunyuan" || value === "google" ? value : DEFAULT_CONFIG.backend;
+}
+
+function asDebounceMs(value: unknown): number {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return DEFAULT_CONFIG.thinkingDebounceMs;
+  return Math.min(30_000, Math.max(250, Math.round(n)));
 }

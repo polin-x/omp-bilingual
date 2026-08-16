@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "license": "MIT",
   "description": "Paragraph-level Chinese/English cards for English assistant replies",
@@ -11,7 +11,7 @@
       "enabled": {
         "type": "boolean",
         "default": true,
-        "description": "Translate English assistant prose into a bilingual card"
+        "description": "Translate English assistant prose"
       },
       "backend": {
         "type": "enum",
@@ -22,12 +22,27 @@
       "target": {
         "type": "string",
         "default": "zh-CN",
-        "description": "Target language code (Google uses this; LLM backends always emit Simplified Chinese)"
+        "description": "Target language code (zh-CN, ja, en, … or any Google/LLM language)"
+      },
+      "sourceLang": {
+        "type": "string",
+        "default": "auto",
+        "description": "Source language code (auto, en, zh-CN, …)"
+      },
+      "translateThinking": {
+        "type": "boolean",
+        "default": true,
+        "description": "Translate assistant thinking blocks"
+      },
+      "thinkingDebounceMs": {
+        "type": "number",
+        "default": 2000,
+        "description": "Wait this many ms after thinking settles before translating"
       },
       "deepseekApiKey": {
         "type": "string",
         "secret": true,
-        "description": "DeepSeek API key (set via /bilingual configure)"
+        "description": "DeepSeek API key (set via /bilingual settings)"
       },
       "deepseekModel": {
         "type": "string",
@@ -37,7 +52,7 @@
       "hunyuanApiKey": {
         "type": "string",
         "secret": true,
-        "description": "Hunyuan / TokenHub API key (set via /bilingual configure)"
+        "description": "Hunyuan / TokenHub API key (set via /bilingual settings)"
       },
       "hunyuanBaseUrl": {
         "type": "string",

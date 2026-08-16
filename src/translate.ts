@@ -1,4 +1,5 @@
 import type { Backend, Pair, PluginConfig } from "./types.ts";
+import { languageName } from "./types.ts";
 
 const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 
@@ -10,7 +11,7 @@ export async function translateParagraphs(
   if (paragraphs.length === 0) return [];
   switch (config.backend) {
     case "google":
-      return translateGoogle(paragraphs, config.target, signal);
+      return translateGoogle(paragraphs, config, signal);
     case "deepseek":
       return translateOpenAi(
         paragraphs,
@@ -20,6 +21,7 @@ export async function translateParagraphs(
           model: config.deepseekModel,
           name: "DeepSeek",
           disableThinking: true,
+          target: config.target,
         },
         signal,
       );
@@ -31,6 +33,7 @@ export async function translateParagraphs(
           baseUrl: config.hunyuanBaseUrl,
           model: config.hunyuanModel,
           name: "Hunyuan",
+          target: config.target,
         },
         signal,
       );
@@ -39,14 +42,14 @@ export async function translateParagraphs(
   }
 }
 
-async function translateGoogle(paragraphs: string[], target: string, signal?: AbortSignal): Promise<Pair[]> {
+async function translateGoogle(paragraphs: string[], config: PluginConfig, signal?: AbortSignal): Promise<Pair[]> {
   const pairs: Pair[] = [];
   for (const en of paragraphs) {
     const { masked, tokens } = protectMarkup(en);
     const url = new URL(GOOGLE_ENDPOINT);
     url.searchParams.set("client", "gtx");
-    url.searchParams.set("sl", "auto");
-    url.searchParams.set("tl", target || "zh-CN");
+    url.searchParams.set("sl", config.sourceLang || "auto");
+    url.searchParams.set("tl", config.target || "zh-CN");
     url.searchParams.set("dt", "t");
     url.searchParams.set("q", masked);
     const res = await fetch(url, { signal });
@@ -72,6 +75,7 @@ type OpenAiOpts = {
   model: string;
   name: string;
   disableThinking?: boolean;
+  target: string;
 };
 
 async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: AbortSignal): Promise<Pair[]> {
@@ -93,7 +97,7 @@ async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: 
         {
           role: "system",
           content:
-            "Translate each numbered paragraph into Simplified Chinese. " +
+            `Translate each numbered paragraph into ${languageName(opts.target)}. ` +
             "Use only the text of that paragraph. Do not infer prior conversation, user intent, or missing context. " +
             "Return ONLY a JSON array of strings, same length and order. " +
             "Do not translate code, paths, commands, or identifiers. Keep those tokens intact.",
