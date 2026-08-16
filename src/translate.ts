@@ -110,26 +110,69 @@ async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: 
     choices?: Array<{ message?: { content?: string } }>;
   };
   const content = payload.choices?.[0]?.message?.content ?? "";
-  const zhList = parseJsonStringArray(content);
-  if (zhList.length !== paragraphs.length) {
-    throw new Error(`${opts.name} returned ${zhList.length} lines for ${paragraphs.length} paragraphs`);
-  }
+  const zhList = parseTranslationList(content, paragraphs.length);
   const pairs: Pair[] = [];
-  for (let i = 0; i < paragraphs.length; i++) {
+  const n = Math.min(paragraphs.length, zhList.length);
+  for (let i = 0; i < n; i++) {
     const en = paragraphs[i] ?? "";
     const zh = restoreMarkup((zhList[i] ?? "").trim(), protectedParas[i]?.tokens ?? []);
-    if (en) pairs.push({ en, zh });
+    if (en && zh) pairs.push({ en, zh });
   }
+  if (pairs.length === 0) throw new Error(`${opts.name} returned no usable translations`);
   return pairs;
 }
 
-function parseJsonStringArray(raw: string): string[] {
-  const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed: unknown = JSON.parse(trimmed);
-  if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string")) {
-    throw new Error("expected a JSON string array");
+function parseTranslationList(raw: string, expected: number): string[] {
+  const stripped = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const bracketStart = stripped.indexOf("[");
+  const bracketEnd = stripped.lastIndexOf("]");
+  const bracketed =
+    bracketStart >= 0 && bracketEnd > bracketStart ? stripped.slice(bracketStart, bracketEnd + 1) : "";
+  const fromJson = asStringArray(tryJson(stripped)) ?? asStringArray(tryJson(bracketed));
+  if (fromJson) return fitList(fromJson, expected, stripped);
+  const numbered = parseNumberedList(stripped);
+  if (numbered.length > 0) return fitList(numbered, expected, stripped);
+  if (expected === 1 && stripped) return [stripped];
+  throw new Error("expected a JSON string array");
+}
+
+function tryJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
   }
-  return parsed;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  if (value.every((x) => typeof x === "string")) return value;
+  if (value.every((x) => typeof x === "string" || typeof x === "number")) {
+    return value.map((x) => String(x));
+  }
+  return undefined;
+}
+
+function parseNumberedList(raw: string): string[] {
+  const items: string[] = [];
+  for (const line of raw.split(/\n+/)) {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^\d+[.)、]\s*(.*)$/);
+    if (!match) continue;
+    const text = (match[1] ?? "").trim();
+    if (text) items.push(text);
+  }
+  return items;
+}
+
+function fitList(list: string[], expected: number, fallback: string): string[] {
+  if (expected <= 0) return list;
+  if (list.length === expected) return list;
+  if (expected === 1) return [list.join("\n")];
+  if (list.length > expected) return list.slice(0, expected);
+  if (list.length === 1 && fallback) return list;
+  return list;
 }
 
 function joinUrl(base: string, path: string): string {

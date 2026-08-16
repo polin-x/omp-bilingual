@@ -15,6 +15,11 @@ export default function bilingual(pi: ExtensionAPI): void {
   const paraZh = new Map<string, string>();
   const paraFailed = new Set<string>();
   const paraBusy = new Set<string>();
+  const THINKING_DEBOUNCE_MS = 2000;
+  let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
+  let cancelTimer: ((id: unknown) => void) | undefined;
+  let thinkingTimer: unknown;
+  let thinkingQueued: { closed: string[]; requestRender: () => void } | undefined;
 
   const rememberZh = (en: string, zh: string) => {
     paraZh.set(en, zh);
@@ -57,19 +62,32 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
+  const flushThinkingTranslate = () => {
+    thinkingTimer = undefined;
+    const job = thinkingQueued;
+    thinkingQueued = undefined;
+    if (!job) return;
+    void translateFresh(job.closed, job.requestRender).catch((err) => {
+      pi.logger.error("bilingual thinking translate failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
   pi.registerAssistantThinkingRenderer((context, theme) => {
     const { closed } = partitionTranslatableParagraphs(context.text);
     if (closed.length === 0) return undefined;
     const view = new ThinkingTranslationView(theme);
     const zh = closed.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh);
-    if (closed.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) {
-      void translateFresh(closed, () => context.requestRender()).catch((err) => {
-        pi.logger.error("bilingual thinking translate failed", {
-          err: err instanceof Error ? err.message : String(err),
-        });
-      });
+    if (!closed.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
+    if (!scheduleTimer) return view;
+    thinkingQueued = { closed, requestRender: () => context.requestRender() };
+    if (thinkingTimer != null) {
+      cancelTimer?.(thinkingTimer);
+      thinkingTimer = undefined;
     }
+    thinkingTimer = scheduleTimer(flushThinkingTranslate, THINKING_DEBOUNCE_MS);
     return view;
   });
 
@@ -78,6 +96,8 @@ export default function bilingual(pi: ExtensionAPI): void {
   }));
 
   pi.on("session_start", async (_event, ctx) => {
+    scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
+    cancelTimer = (id) => ctx.clearTimer(id);
     const config = await loadConfig();
     ctx.ui.setStatus("bilingual", barStatus(config));
   });
