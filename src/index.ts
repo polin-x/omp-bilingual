@@ -1,14 +1,13 @@
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
+import { partitionTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
-import { CUSTOM_TYPE, PACKAGE_VERSION, type Backend, type BilingualDetails, type Pair, type PluginConfig } from "./types.ts";
+import { CUSTOM_TYPE, PACKAGE_VERSION, type Backend, type Pair, type PluginConfig } from "./types.ts";
 
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
-  const pending: BilingualDetails[] = [];
 
   pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => renderBilingualCard(message, theme));
 
@@ -105,23 +104,15 @@ export default function bilingual(pi: ExtensionAPI): void {
     ctx.ui.setStatus("bilingual", barStatus(config));
   });
 
-  pi.on("message_end", async (event, ctx) => {
+  pi.on("message_end", (event) => {
     if (event.message.role !== "assistant") return;
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
       thinkingTimer = undefined;
     }
     flushThinkingTranslate();
-    if (!isContinuableAssistant(event.message)) {
-      lastThinkingRender?.();
-      return;
-    }
-    await translateAssistant(pi, ctx, event.message, pending, paraZh, translateFresh);
     lastThinkingRender?.();
   });
-
-  pi.on("turn_end", (_event, ctx) => flushPending(pi, ctx, pending, false));
-  pi.on("agent_end", (_event, ctx) => flushPending(pi, ctx, pending, true));
 
   pi.registerCommand("bilingual", {
     description: "Toggle or configure paragraph bilingual cards",
@@ -159,68 +150,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 }
 
-async function translateAssistant(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  message: { role?: string; content?: unknown },
-  pending: BilingualDetails[],
-  paraZh: Map<string, string>,
-  translateFresh: (paras: string[]) => Promise<Pair[]>,
-): Promise<void> {
-  const config = await loadConfig();
-  if (!config.enabled) return;
-  const sources = extractSourceParagraphs(message);
-  if (sources.length === 0) return;
-  ctx.ui.setStatus("bilingual", "译:…");
-  try {
-    await translateFresh(sources.map((s) => s.text));
-    const pairs = sources.flatMap((source) => {
-      const zh = paraZh.get(source.text);
-      if (!zh || zh === source.text) return [];
-      return [{ en: source.text, zh, kind: source.kind }];
-    });
-    if (pairs.length === 0) {
-      ctx.ui.setStatus("bilingual", barStatus(config));
-      return;
-    }
-    pending.push({ pairs, backend: config.backend });
-    flushPending(pi, ctx, pending, false);
-    ctx.ui.setStatus("bilingual", barStatus(config));
-  } catch (err) {
-    const text = err instanceof Error ? err.message : String(err);
-    pi.logger.error("bilingual translate failed", { err: text });
-    ctx.ui.notify(`对照失败: ${text}`, "warning");
-    ctx.ui.setStatus("bilingual", "译:err");
-  }
-}
-
-function flushPending(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  pending: BilingualDetails[],
-  force: boolean,
-): void {
-  if ((!force && !ctx.isIdle()) || pending.length === 0) return;
-  const cards = pending.splice(0, pending.length);
-  for (const details of cards) {
-    pi.sendMessage(
-      {
-        customType: CUSTOM_TYPE,
-        content: details.pairs.map((p) => p.zh).join("\n\n"),
-        display: true,
-        attribution: "agent",
-        details,
-      },
-      { triggerTurn: false },
-    );
-  }
-}
-
-function isContinuableAssistant(message: object): boolean {
-  if (!("stopReason" in message)) return true;
-  const stop = message.stopReason;
-  return stop !== "error" && stop !== "aborted";
-}
 
 
 const SUBCOMMANDS = [
