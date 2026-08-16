@@ -1,47 +1,74 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractSourceParagraphs, fingerprintParagraphs, splitTranslatableParagraphs } from "./extract.ts";
+import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
-import { CUSTOM_TYPE, type Backend, type BilingualDetails, type PluginConfig } from "./types.ts";
+import { CUSTOM_TYPE, type Backend, type BilingualDetails, type Pair, type PluginConfig } from "./types.ts";
 
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
-  const inflight = new Set<string>();
-  const seen = new Set<string>();
   const pending: BilingualDetails[] = [];
 
   pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => renderBilingualCard(message, theme));
 
-  const thinkingZh = new Map<string, string>();
-  const thinkingBusy = new Set<string>();
-  pi.registerAssistantThinkingRenderer((context, theme) => {
-    const paras = splitTranslatableParagraphs(context.text);
-    if (paras.length === 0) return undefined;
-    const key = paras.join("\n\u241e\n");
-    const view = new ThinkingTranslationView(theme);
-    const cached = thinkingZh.get(key);
-    if (cached) {
-      view.setZh(cached);
-      return view;
+  const paraZh = new Map<string, string>();
+  const paraFailed = new Set<string>();
+  const paraBusy = new Set<string>();
+
+  const rememberZh = (en: string, zh: string) => {
+    paraZh.set(en, zh);
+    if (paraZh.size > 128) {
+      const first = paraZh.keys().next().value;
+      if (first !== undefined) paraZh.delete(first);
     }
-    if (!thinkingBusy.has(key)) {
-      thinkingBusy.add(key);
-      void loadConfig()
-        .then((config) => (config.enabled ? translateParagraphs(paras, config) : []))
-        .then((pairs) => {
-          const zh = pairs.map((p) => p.zh).filter(Boolean).join("\n\n");
-          if (zh) thinkingZh.set(key, zh);
-          view.setZh(zh);
-          context.requestRender();
-        })
-        .catch((err) => {
-          pi.logger.error("bilingual thinking translate failed", {
-            err: err instanceof Error ? err.message : String(err),
-          });
-        })
-        .finally(() => thinkingBusy.delete(key));
+  };
+
+  const rememberFail = (en: string) => {
+    paraFailed.add(en);
+    if (paraFailed.size > 64) {
+      const first = paraFailed.values().next().value;
+      if (first !== undefined) paraFailed.delete(first);
+    }
+  };
+
+  const translateFresh = async (paras: string[], requestRender?: () => void): Promise<Pair[]> => {
+    const fresh = paras.filter((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p));
+    if (fresh.length === 0) return [];
+    for (const p of fresh) paraBusy.add(p);
+    try {
+      const config = await loadConfig();
+      if (!config.enabled) return [];
+      const pairs = await translateParagraphs(fresh, config);
+      const out: Pair[] = [];
+      for (const pair of pairs) {
+        if (pair.zh && pair.zh !== pair.en) {
+          rememberZh(pair.en, pair.zh);
+          out.push(pair);
+        }
+      }
+      requestRender?.();
+      return out;
+    } catch (err) {
+      for (const p of fresh) rememberFail(p);
+      throw err;
+    } finally {
+      for (const p of fresh) paraBusy.delete(p);
+    }
+  };
+
+  pi.registerAssistantThinkingRenderer((context, theme) => {
+    const { closed } = partitionTranslatableParagraphs(context.text);
+    if (closed.length === 0) return undefined;
+    const view = new ThinkingTranslationView(theme);
+    const zh = closed.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
+    if (zh) view.setZh(zh);
+    if (closed.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) {
+      void translateFresh(closed, () => context.requestRender()).catch((err) => {
+        pi.logger.error("bilingual thinking translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
     return view;
   });
@@ -61,7 +88,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return;
     if (!isContinuableAssistant(event.message)) return;
-    await translateAssistant(pi, ctx, event.message, inflight, seen, pending);
+    await translateAssistant(pi, ctx, event.message, pending, paraZh, translateFresh);
   });
 
   pi.on("turn_end", (_event, ctx) => flushPending(pi, ctx, pending));
@@ -110,33 +137,22 @@ async function translateAssistant(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   message: { role?: string; content?: unknown },
-  inflight: Set<string>,
-  seen: Set<string>,
   pending: BilingualDetails[],
+  paraZh: Map<string, string>,
+  translateFresh: (paras: string[]) => Promise<Pair[]>,
 ): Promise<void> {
   const config = await loadConfig();
   if (!config.enabled) return;
   const sources = extractSourceParagraphs(message);
   if (sources.length === 0) return;
-  const key = fingerprintParagraphs(sources);
-  if (seen.has(key) || inflight.has(key)) return;
-  inflight.add(key);
   ctx.ui.setStatus("bilingual", "译:…");
   try {
-    const translated = await translateParagraphs(
-      sources.map((s) => s.text),
-      config,
-    );
-    const pairs = translated.flatMap((pair, i) => {
-      const kind = sources[i]?.kind ?? "text";
-      if (!pair.zh || pair.zh === pair.en) return [];
-      return [{ ...pair, kind }];
+    await translateFresh(sources.map((s) => s.text));
+    const pairs = sources.flatMap((source) => {
+      const zh = paraZh.get(source.text);
+      if (!zh || zh === source.text) return [];
+      return [{ en: source.text, zh, kind: source.kind }];
     });
-    seen.add(key);
-    if (seen.size > 48) {
-      const first = seen.values().next().value;
-      if (first !== undefined) seen.delete(first);
-    }
     if (pairs.length === 0) {
       ctx.ui.setStatus("bilingual", `译:${describeBackend(config.backend)}`);
       return;
@@ -149,8 +165,6 @@ async function translateAssistant(
     pi.logger.error("bilingual translate failed", { err: text });
     ctx.ui.notify(`对照失败: ${text}`, "warning");
     ctx.ui.setStatus("bilingual", "译:err");
-  } finally {
-    inflight.delete(key);
   }
 }
 

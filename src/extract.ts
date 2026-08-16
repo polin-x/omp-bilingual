@@ -25,19 +25,20 @@ export function extractSourceParagraphs(message: { role?: string; content?: unkn
   return out;
 }
 
-export function fingerprintParagraphs(paragraphs: SourceParagraph[]): string {
-  return paragraphs.map((p) => `${p.kind}:${p.text}`).join("\n\u241e\n");
-}
+export type PartitionedParagraphs = {
+  closed: string[];
+  open: string | undefined;
+};
 
-export function splitTranslatableParagraphs(source: string): string[] {
-  const out: string[] = [];
+export function partitionTranslatableParagraphs(source: string): PartitionedParagraphs {
+  const closed: string[] = [];
   let fence: string | undefined;
   let para: string[] = [];
 
   const flush = () => {
     const text = para.join("\n").trim();
     para = [];
-    if (text && isTranslatable(text)) out.push(text);
+    if (text && isTranslatable(text)) closed.push(text);
   };
 
   for (const raw of source.replaceAll("\r\n", "\n").split("\n")) {
@@ -63,8 +64,14 @@ export function splitTranslatableParagraphs(source: string): string[] {
     }
     para.push(raw);
   }
-  flush();
-  return out;
+  const openText = para.join("\n").trim();
+  const open = openText && isTranslatable(openText) ? openText : undefined;
+  return { closed, open };
+}
+
+export function splitTranslatableParagraphs(source: string): string[] {
+  const { closed, open } = partitionTranslatableParagraphs(source);
+  return open ? [...closed, open] : closed;
 }
 
 export function isTranslatable(text: string): boolean {

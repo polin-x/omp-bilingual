@@ -19,6 +19,7 @@ export async function translateParagraphs(
           baseUrl: "https://api.deepseek.com",
           model: config.deepseekModel,
           name: "DeepSeek",
+          disableThinking: true,
         },
         signal,
       );
@@ -70,6 +71,7 @@ type OpenAiOpts = {
   baseUrl: string;
   model: string;
   name: string;
+  disableThinking?: boolean;
 };
 
 async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: AbortSignal): Promise<Pair[]> {
@@ -86,6 +88,7 @@ async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: 
     body: JSON.stringify({
       model: opts.model,
       temperature: 0.1,
+      ...(opts.disableThinking ? { thinking: { type: "disabled" } } : {}),
       messages: [
         {
           role: "system",
