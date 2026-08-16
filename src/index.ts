@@ -19,7 +19,8 @@ export default function bilingual(pi: ExtensionAPI): void {
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
   let thinkingTimer: unknown;
-  let thinkingQueued: { closed: string[]; requestRender: () => void } | undefined;
+  let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
+  let lastThinkingRender: (() => void) | undefined;
 
   const rememberZh = (en: string, zh: string) => {
     paraZh.set(en, zh);
@@ -67,7 +68,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     const job = thinkingQueued;
     thinkingQueued = undefined;
     if (!job) return;
-    void translateFresh(job.closed, job.requestRender).catch((err) => {
+    void translateFresh(job.paras, job.requestRender).catch((err) => {
       pi.logger.error("bilingual thinking translate failed", {
         err: err instanceof Error ? err.message : String(err),
       });
@@ -75,14 +76,16 @@ export default function bilingual(pi: ExtensionAPI): void {
   };
 
   pi.registerAssistantThinkingRenderer((context, theme) => {
-    const { closed } = partitionTranslatableParagraphs(context.text);
-    if (closed.length === 0) return undefined;
+    const { closed, open } = partitionTranslatableParagraphs(context.text);
+    const paras = open ? [...closed, open] : closed;
+    if (paras.length === 0) return undefined;
+    lastThinkingRender = () => context.requestRender();
     const view = new ThinkingTranslationView(theme);
-    const zh = closed.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
+    const zh = paras.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh);
-    if (!closed.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
+    if (!paras.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
     if (!scheduleTimer) return view;
-    thinkingQueued = { closed, requestRender: () => context.requestRender() };
+    thinkingQueued = { paras, requestRender: lastThinkingRender };
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
       thinkingTimer = undefined;
@@ -104,12 +107,21 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return;
-    if (!isContinuableAssistant(event.message)) return;
+    if (thinkingTimer != null) {
+      cancelTimer?.(thinkingTimer);
+      thinkingTimer = undefined;
+    }
+    flushThinkingTranslate();
+    if (!isContinuableAssistant(event.message)) {
+      lastThinkingRender?.();
+      return;
+    }
     await translateAssistant(pi, ctx, event.message, pending, paraZh, translateFresh);
+    lastThinkingRender?.();
   });
 
-  pi.on("turn_end", (_event, ctx) => flushPending(pi, ctx, pending));
-  pi.on("agent_end", (_event, ctx) => flushPending(pi, ctx, pending));
+  pi.on("turn_end", (_event, ctx) => flushPending(pi, ctx, pending, false));
+  pi.on("agent_end", (_event, ctx) => flushPending(pi, ctx, pending, true));
 
   pi.registerCommand("bilingual", {
     description: "Toggle or configure paragraph bilingual cards",
@@ -172,7 +184,7 @@ async function translateAssistant(
       return;
     }
     pending.push({ pairs, backend: config.backend });
-    flushPending(pi, ctx, pending);
+    flushPending(pi, ctx, pending, false);
     ctx.ui.setStatus("bilingual", barStatus(config));
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
@@ -182,8 +194,13 @@ async function translateAssistant(
   }
 }
 
-function flushPending(pi: ExtensionAPI, ctx: ExtensionContext, pending: BilingualDetails[]): void {
-  if (!ctx.isIdle() || pending.length === 0) return;
+function flushPending(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  pending: BilingualDetails[],
+  force: boolean,
+): void {
+  if ((!force && !ctx.isIdle()) || pending.length === 0) return;
   const cards = pending.splice(0, pending.length);
   for (const details of cards) {
     pi.sendMessage(
