@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import type { Backend, PluginConfig } from "./types.ts";
-import { TARGET_LANGUAGES, languageName } from "./types.ts";
+import { ORNAMENT_PRESETS, TARGET_LANGUAGES, languageName, resolveOrnament } from "./types.ts";
 
 export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig | undefined> {
   if (!ctx.hasUI) return undefined;
@@ -15,6 +15,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
+      { label: "ornament", description: resolveOrnament(cfg.ornament).frames[0] ?? cfg.ornament },
       { label: "provider", description: providerHint(cfg) },
       { label: "more", description: `source ${cfg.sourceLang} · debounce ${cfg.thinkingDebounceMs}ms` },
     ]);
@@ -68,6 +69,19 @@ async function editItem(
     ]);
     if (v === undefined) return undefined;
     return { ...cfg, translateText: v === "on" };
+  }
+  if (item === "ornament") {
+    const picked = await pickOrType(
+      ctx,
+      "Translation ornament",
+      cfg.ornament,
+      ORNAMENT_PRESETS.map((p) => ({
+        label: p.id,
+        description: p.frames.join(" "),
+      })),
+    );
+    if (picked === undefined) return undefined;
+    return { ...cfg, ornament: picked };
   }
   if (item === "provider") return editProvider(ctx, cfg);
   if (item === "more") return editMore(ctx, cfg);

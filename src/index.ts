@@ -86,7 +86,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         content: card.pairs.map((p) => p.zh).join("\n\n"),
         display: true,
         attribution: "agent",
-        details: { pairs: card.pairs, backend: card.backend },
+        details: { pairs: card.pairs, backend: card.backend, ornament: liveConfig.ornament },
       },
       { triggerTurn: false },
     );
@@ -112,6 +112,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (paras.length === 0) return undefined;
     lastThinkingRender = () => context.requestRender();
     const view = new ThinkingTranslationView(theme);
+    view.setOrnament(liveConfig.ornament);
     const zh = paras.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh);
     if (!paras.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
@@ -134,6 +135,9 @@ export default function bilingual(pi: ExtensionAPI): void {
     cancelTimer = (id) => ctx.clearTimer(id);
     liveConfig = await loadConfig();
     sessionIsIdle = () => ctx.isIdle();
+    ctx.setInterval(() => {
+      lastThinkingRender?.();
+    }, 220);
     ctx.ui.setStatus("bilingual", barStatus(liveConfig));
   });
 

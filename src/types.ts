@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.10";
+export const PACKAGE_VERSION = "0.1.11";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 
@@ -13,6 +13,7 @@ export type Pair = {
 export type BilingualDetails = {
   pairs: Pair[];
   backend: Backend;
+  ornament?: string;
 };
 
 export type PluginConfig = {
@@ -22,6 +23,7 @@ export type PluginConfig = {
   sourceLang: string;
   translateThinking: boolean;
   translateText: boolean;
+  ornament: string;
   thinkingDebounceMs: number;
   deepseekApiKey: string;
   deepseekModel: string;
@@ -52,6 +54,30 @@ export function languageName(code: string): string {
   return hit?.name ?? (code.trim() || "Simplified Chinese");
 }
 
+export type OrnamentSpec = {
+  id: string;
+  name: string;
+  frames: string[];
+};
+
+export const ORNAMENT_PRESETS: OrnamentSpec[] = [
+  { id: "bar", name: "bar", frames: ["│"] },
+  { id: "globe", name: "globe", frames: ["🌍", "🌎", "🌏"] },
+  { id: "shinchan", name: "shinchan", frames: ["小新", "小☆", "☆新", "小新"] },
+  { id: "capybara", name: "capybara", frames: ["🦫", "噜", "🦫", "噜噜"] },
+];
+export function resolveOrnament(value: string): OrnamentSpec {
+  const id = value.trim() || "globe";
+  const hit = ORNAMENT_PRESETS.find((p) => p.id === id);
+  if (hit) return hit;
+  return { id: "custom", name: id, frames: [id] };
+}
+
+export function ornamentFrame(value: string, atMs = Date.now()): string {
+  const spec = resolveOrnament(value);
+  return spec.frames[Math.floor(atMs / 220) % spec.frames.length] ?? spec.frames[0] ?? "│";
+}
+
 export const DEFAULT_CONFIG: PluginConfig = {
   enabled: true,
   backend: "google",
@@ -59,6 +85,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   sourceLang: "auto",
   translateThinking: true,
   translateText: true,
+  ornament: "globe",
   thinkingDebounceMs: 2000,
   deepseekApiKey: "",
   deepseekModel: "deepseek-v4-flash",

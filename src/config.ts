@@ -37,6 +37,7 @@ export async function loadConfig(): Promise<PluginConfig> {
         : DEFAULT_CONFIG.translateThinking,
     translateText:
       typeof merged.translateText === "boolean" ? merged.translateText : DEFAULT_CONFIG.translateText,
+    ornament: asString(merged.ornament, DEFAULT_CONFIG.ornament),
     thinkingDebounceMs: asDebounceMs(merged.thinkingDebounceMs),
     deepseekApiKey: asString(merged.deepseekApiKey, DEFAULT_CONFIG.deepseekApiKey),
     deepseekModel: asString(merged.deepseekModel, DEFAULT_CONFIG.deepseekModel),

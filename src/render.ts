@@ -3,7 +3,7 @@ import type { Component, MarkdownTheme } from "@oh-my-pi/pi-tui";
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
 import type { BilingualDetails } from "./types.ts";
-import { CUSTOM_TYPE } from "./types.ts";
+import { CUSTOM_TYPE, ornamentFrame } from "./types.ts";
 
 type ThemeLike = {
   fg(color: string, text: string): string;
@@ -48,9 +48,10 @@ export function renderBilingualCard(
   const details = isBilingualDetails(message.details) ? message.details : undefined;
   const pairs = details?.pairs ?? [];
   if (pairs.length === 0) return undefined;
+  const ornament = details?.ornament ?? "globe";
 
   const mdTheme = markdownTheme(theme);
-  const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+  const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
   box.setIgnoreTight(true);
   box.setBorder({
     chars: theme.boxRound,
@@ -60,33 +61,60 @@ export function renderBilingualCard(
     const pair = pairs[i]!;
     const thinking = pair.kind === "thinking";
     box.addChild(
-      new Markdown(pair.en, 0, 0, mdTheme, {
-        color: (t) => theme.fg(thinking ? "thinkingText" : "dim", t),
-        italic: thinking,
-      }),
+      new Trimmed(
+        new Markdown(pair.en, 0, 0, mdTheme, {
+          color: (t) => theme.fg(thinking ? "thinkingText" : "dim", t),
+          italic: thinking,
+        }),
+      ),
     );
-    box.addChild(markedZh(pair.zh, theme, mdTheme));
+    box.addChild(markedZh(pair.zh, theme, mdTheme, ornament, false));
     if (i < pairs.length - 1) box.addChild(new Spacer(1));
   }
   box.addChild(new CornerTag(theme.fg("dim", `译·${details?.backend ?? "google"}`)));
   return box;
 }
 
-export function renderThinkingTranslation(zh: string, theme: ThemeLike): Component {
-  return markedZh(zh, theme, markdownTheme(theme));
+export function renderThinkingTranslation(zh: string, theme: ThemeLike, ornament = "globe"): Component {
+  return markedZh(zh, theme, markdownTheme(theme), ornament, true);
 }
 
-function markedZh(zh: string, theme: ThemeLike, mdTheme: MarkdownTheme): Component {
+function markedZh(
+  zh: string,
+  theme: ThemeLike,
+  mdTheme: MarkdownTheme,
+  ornament: string,
+  animate: boolean,
+): Component {
   const md = new Markdown(zh, 0, 0, mdTheme, {
     color: (t) => theme.fg("accent", t),
   });
-  return new Prefixed(md, theme.fg("accent", "│ "));
+  return new Prefixed(new Trimmed(md), () =>
+    theme.fg("accent", `${ornamentFrame(ornament, animate ? Date.now() : 0)} `),
+  );
+}
+
+class Trimmed implements Component {
+  constructor(private readonly inner: Component) {}
+
+  invalidate(): void {
+    this.inner.invalidate?.();
+  }
+
+  render(width: number): readonly string[] {
+    const lines = this.inner.render(width);
+    let start = 0;
+    let end = lines.length;
+    while (start < end && visibleWidth(lines[start] ?? "") === 0) start += 1;
+    while (end > start && visibleWidth(lines[end - 1] ?? "") === 0) end -= 1;
+    return lines.slice(start, end);
+  }
 }
 
 class Prefixed implements Component {
   constructor(
     private readonly inner: Component,
-    private readonly prefix: string,
+    private readonly prefix: () => string,
   ) {}
 
   invalidate(): void {
@@ -94,20 +122,28 @@ class Prefixed implements Component {
   }
 
   render(width: number): readonly string[] {
-    const innerWidth = Math.max(1, width - visibleWidth(this.prefix));
-    return this.inner.render(innerWidth).map((line) => this.prefix + line);
+    const mark = this.prefix();
+    const innerWidth = Math.max(1, width - visibleWidth(mark));
+    return this.inner.render(innerWidth).map((line) => mark + line);
   }
 }
 
 export class ThinkingTranslationView implements Component {
   #zh = "";
+  #ornament = "globe";
   #child: Component | undefined;
   constructor(private readonly theme: ThemeLike) {}
 
+  setOrnament(ornament: string): void {
+    if (ornament === this.#ornament) return;
+    this.#ornament = ornament;
+    this.#child = this.#zh ? renderThinkingTranslation(this.#zh, this.theme, this.#ornament) : undefined;
+  }
+
   setZh(zh: string): void {
-    if (zh === this.#zh) return;
+    if (zh === this.#zh && this.#child) return;
     this.#zh = zh;
-    this.#child = zh ? renderThinkingTranslation(zh, this.theme) : undefined;
+    this.#child = zh ? renderThinkingTranslation(zh, this.theme, this.#ornament) : undefined;
   }
 
   invalidate(): void {
@@ -115,7 +151,8 @@ export class ThinkingTranslationView implements Component {
   }
 
   render(width: number): readonly string[] {
-    return this.#child?.render(width) ?? [""];
+    if (this.#zh) this.#child = renderThinkingTranslation(this.#zh, this.theme, this.#ornament);
+    return this.#child?.render(width) ?? [];
   }
 }
 
