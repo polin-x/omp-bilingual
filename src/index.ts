@@ -4,7 +4,7 @@ import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
-import { CUSTOM_TYPE, type Backend, type BilingualDetails, type Pair, type PluginConfig } from "./types.ts";
+import { CUSTOM_TYPE, PACKAGE_VERSION, type Backend, type BilingualDetails, type Pair, type PluginConfig } from "./types.ts";
 
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
@@ -79,10 +79,7 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     const config = await loadConfig();
-    ctx.ui.setStatus(
-      "bilingual",
-      config.enabled ? `译:${describeBackend(config.backend)}` : "译:off",
-    );
+    ctx.ui.setStatus("bilingual", barStatus(config));
   });
 
   pi.on("message_end", async (event, ctx) => {
@@ -115,7 +112,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         }
         const next = await runConfigure(ctx);
         if (!next) return;
-        ctx.ui.setStatus("bilingual", next.enabled ? `译:${describeBackend(next.backend)}` : "译:off");
+        ctx.ui.setStatus("bilingual", barStatus(next));
         ctx.ui.notify(statusLine(next), "info");
         return;
       }
@@ -124,10 +121,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         ctx.ui.notify(next, "info");
         return;
       }
-      ctx.ui.setStatus(
-        "bilingual",
-        next.enabled ? `译:${describeBackend(next.backend)}` : "译:off",
-      );
+      ctx.ui.setStatus("bilingual", barStatus(next));
       ctx.ui.notify(statusLine(next), "info");
     },
   });
@@ -154,12 +148,12 @@ async function translateAssistant(
       return [{ en: source.text, zh, kind: source.kind }];
     });
     if (pairs.length === 0) {
-      ctx.ui.setStatus("bilingual", `译:${describeBackend(config.backend)}`);
+      ctx.ui.setStatus("bilingual", barStatus(config));
       return;
     }
     pending.push({ pairs, backend: config.backend });
     flushPending(pi, ctx, pending);
-    ctx.ui.setStatus("bilingual", `译:${describeBackend(config.backend)}`);
+    ctx.ui.setStatus("bilingual", barStatus(config));
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     pi.logger.error("bilingual translate failed", { err: text });
@@ -195,7 +189,9 @@ function isContinuableAssistant(message: object): boolean {
 const SUBCOMMANDS = [
   { name: "on", description: "Enable bilingual cards" },
   { name: "off", description: "Disable bilingual cards" },
-  { name: "status", description: "Show backend, model, and on/off" },
+  { name: "status", description: "Show backend, model, version, and on/off" },
+  { name: "version", description: "Show installed plugin version" },
+  { name: "update", description: "How to upgrade this plugin" },
   { name: "configure", description: "Open TUI to set backend, key, and model" },
   { name: "google", description: "Switch to free Google Translate" },
   { name: "deepseek", description: "Switch to DeepSeek (configure key first)" },
@@ -203,7 +199,15 @@ const SUBCOMMANDS = [
 ];
 async function applyCommand(args: string): Promise<PluginConfig | string> {
   const [cmd = "", ...rest] = args.split(/\s+/).filter(Boolean);
-  if (!cmd || cmd === "status") return statusLine(await loadConfig());
+  if (cmd === "update") {
+    return [
+      `installed ${PACKAGE_VERSION}`,
+      "升级:",
+      "  omp plugin marketplace update",
+      "  omp plugin upgrade bilingual@polin-plugins",
+    ].join("\n");
+  }
+  if (!cmd || cmd === "status" || cmd === "version") return statusLine(await loadConfig());
   if (cmd === "on") return patchConfig({ enabled: true });
   if (cmd === "off") return patchConfig({ enabled: false });
   if (cmd === "google" || cmd === "deepseek" || cmd === "hunyuan") {
@@ -223,19 +227,24 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
   }
   return [
     "用法:",
-    "  /bilingual on|off|status",
+    "  /bilingual on|off|status|version|update",
     "  /bilingual configure",
     "  /bilingual google|deepseek|hunyuan",
   ].join("\n");
 }
 
+function barStatus(config: PluginConfig): string {
+  if (!config.enabled) return `译:off ${PACKAGE_VERSION}`;
+  return `译:${describeBackend(config.backend)} ${PACKAGE_VERSION}`;
+}
+
 function statusLine(config: PluginConfig): string {
   const on = config.enabled ? "on" : "off";
   if (config.backend === "deepseek") {
-    return `bilingual ${on} · deepseek · ${config.deepseekModel}${config.deepseekApiKey ? "" : " · no key"}`;
+    return `bilingual ${PACKAGE_VERSION} ${on} · deepseek · ${config.deepseekModel}${config.deepseekApiKey ? "" : " · no key"}`;
   }
   if (config.backend === "hunyuan") {
-    return `bilingual ${on} · hunyuan · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"}`;
+    return `bilingual ${PACKAGE_VERSION} ${on} · hunyuan · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"}`;
   }
-  return `bilingual ${on} · google · ${config.target}`;
+  return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.target}`;
 }
