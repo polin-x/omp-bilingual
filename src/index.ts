@@ -68,6 +68,16 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.registerCommand("bilingual", {
     description: "Toggle or configure paragraph bilingual cards",
+    getArgumentCompletions(argumentPrefix: string) {
+      if (argumentPrefix.includes(" ")) return null;
+      const lower = argumentPrefix.toLowerCase();
+      const matches = SUBCOMMANDS.filter((s) => s.name.startsWith(lower)).map((s) => ({
+        value: `${s.name} `,
+        label: s.name,
+        description: s.description,
+      }));
+      return matches.length > 0 ? matches : null;
+    },
     handler: async (args, ctx) => {
       const next = await applyCommand(args.trim());
       if (typeof next === "string") {
@@ -81,6 +91,7 @@ export default function bilingual(pi: ExtensionAPI): void {
       ctx.ui.notify(statusLine(next), "info");
     },
   });
+
 }
 
 async function translateAssistant(
@@ -154,6 +165,16 @@ function isContinuableAssistant(message: object): boolean {
   return stop !== "error" && stop !== "aborted";
 }
 
+
+const SUBCOMMANDS = [
+  { name: "on", description: "Enable bilingual cards" },
+  { name: "off", description: "Disable bilingual cards" },
+  { name: "status", description: "Show backend and on/off state" },
+  { name: "google", description: "Use free Google Translate" },
+  { name: "deepseek", description: "Use DeepSeek (needs DEEPSEEK_API_KEY)" },
+  { name: "hunyuan", description: "Use Tencent Hunyuan (needs HUNYUAN_API_KEY)" },
+  { name: "target", description: "Set Google target language, e.g. zh-CN" },
+];
 async function applyCommand(args: string): Promise<PluginConfig | string> {
   const [cmd = "", ...rest] = args.split(/\s+/).filter(Boolean);
   if (!cmd || cmd === "status") return statusLine(await loadConfig());
