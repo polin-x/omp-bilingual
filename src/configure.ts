@@ -14,6 +14,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "backend", description: cfg.backend },
       { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
+      { label: "text", description: cfg.translateText ? "card under reply" : "off" },
       { label: "provider", description: providerHint(cfg) },
       { label: "more", description: `source ${cfg.sourceLang} · debounce ${cfg.thinkingDebounceMs}ms` },
     ]);
@@ -59,6 +60,14 @@ async function editItem(
     ]);
     if (v === undefined) return undefined;
     return { ...cfg, translateThinking: v === "on" };
+  }
+  if (item === "text") {
+    const v = await ctx.ui.select("Translate reply text", [
+      { label: "on", description: "Card directly under the English reply" },
+      { label: "off", description: "Thinking only" },
+    ]);
+    if (v === undefined) return undefined;
+    return { ...cfg, translateText: v === "on" };
   }
   if (item === "provider") return editProvider(ctx, cfg);
   if (item === "more") return editMore(ctx, cfg);

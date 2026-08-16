@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "type": "module",
   "license": "MIT",
   "description": "Paragraph-level Chinese/English cards for English assistant replies",
@@ -33,6 +33,11 @@
         "type": "boolean",
         "default": true,
         "description": "Translate assistant thinking blocks"
+      },
+      "translateText": {
+        "type": "boolean",
+        "default": true,
+        "description": "Show a translation card directly under English reply text"
       },
       "thinkingDebounceMs": {
         "type": "number",

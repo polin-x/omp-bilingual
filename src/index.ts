@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { partitionTranslatableParagraphs } from "./extract.ts";
+import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
 import { CUSTOM_TYPE, DEFAULT_CONFIG, PACKAGE_VERSION, type Backend, type Pair, type PluginConfig } from "./types.ts";
@@ -105,7 +105,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     ctx.ui.setStatus("bilingual", barStatus(liveConfig));
   });
 
-  pi.on("message_end", (event) => {
+  pi.on("message_end", async (event) => {
     if (event.message.role !== "assistant") return;
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
@@ -113,6 +113,33 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
     flushThinkingTranslate();
     lastThinkingRender?.();
+    if (!liveConfig.enabled || !liveConfig.translateText) return;
+    if (messageHasToolCalls(event.message)) return;
+    const texts = extractSourceParagraphs(event.message)
+      .filter((s) => s.kind === "text")
+      .map((s) => s.text);
+    if (texts.length === 0) return;
+    try {
+      const pairs = await translateFresh(texts);
+      if (pairs.length === 0) return;
+      pi.sendMessage(
+        {
+          customType: CUSTOM_TYPE,
+          content: pairs.map((p) => p.zh).join("\n\n"),
+          display: true,
+          attribution: "agent",
+          details: {
+            pairs: pairs.map((p) => ({ ...p, kind: "text" as const })),
+            backend: liveConfig.backend,
+          },
+        },
+        { triggerTurn: false },
+      );
+    } catch (err) {
+      pi.logger.error("bilingual text translate failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   pi.registerCommand("bilingual", {
@@ -219,5 +246,13 @@ function statusLine(config: PluginConfig): string {
     return `bilingual ${PACKAGE_VERSION} ${on} · hunyuan · ${config.target} · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"} · ${think}`;
   }
   return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.sourceLang}→${config.target} · ${think}`;
+}
+
+function messageHasToolCalls(message: { content?: unknown }): boolean {
+  if (!Array.isArray(message.content)) return false;
+  return message.content.some((block) => {
+    if (!block || typeof block !== "object" || !("type" in block)) return false;
+    return block.type === "toolCall" || block.type === "tool_call";
+  });
 }
 

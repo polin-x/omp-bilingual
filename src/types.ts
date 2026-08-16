@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.8";
+export const PACKAGE_VERSION = "0.1.9";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 
@@ -21,6 +21,7 @@ export type PluginConfig = {
   target: string;
   sourceLang: string;
   translateThinking: boolean;
+  translateText: boolean;
   thinkingDebounceMs: number;
   deepseekApiKey: string;
   deepseekModel: string;
@@ -57,6 +58,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   target: "zh-CN",
   sourceLang: "auto",
   translateThinking: true,
+  translateText: true,
   thinkingDebounceMs: 2000,
   deepseekApiKey: "",
   deepseekModel: "deepseek-v4-flash",
