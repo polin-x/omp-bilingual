@@ -1,0 +1,56 @@
+{
+  "name": "omp-bilingual",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Paragraph-level Chinese/English cards for English assistant replies",
+  "keywords": ["omp", "oh-my-pi", "extension", "translate", "bilingual"],
+  "omp": {
+    "extensions": ["./src/index.ts"],
+    "settings": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Translate English assistant prose into a bilingual card"
+      },
+      "backend": {
+        "type": "enum",
+        "values": ["google", "deepseek", "hunyuan"],
+        "default": "google",
+        "description": "Translation backend"
+      },
+      "target": {
+        "type": "string",
+        "default": "zh-CN",
+        "description": "Target language code (Google uses this; LLM backends always emit Simplified Chinese)"
+      },
+      "deepseekApiKey": {
+        "type": "string",
+        "secret": true,
+        "env": "DEEPSEEK_API_KEY",
+        "description": "DeepSeek API key"
+      },
+      "deepseekModel": {
+        "type": "string",
+        "default": "deepseek-v4-flash",
+        "description": "DeepSeek model id"
+      },
+      "hunyuanApiKey": {
+        "type": "string",
+        "secret": true,
+        "env": "HUNYUAN_API_KEY",
+        "description": "Tencent Hunyuan / TokenHub API key"
+      },
+      "hunyuanBaseUrl": {
+        "type": "string",
+        "default": "https://api.hunyuan.cloud.tencent.com/v1",
+        "description": "Hunyuan OpenAI-compatible base URL"
+      },
+      "hunyuanModel": {
+        "type": "string",
+        "default": "hunyuan-turbos-latest",
+        "description": "Hunyuan model id"
+      }
+    }
+  }
+}

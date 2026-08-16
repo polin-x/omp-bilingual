@@ -1,0 +1,78 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { Backend, PluginConfig } from "./types.ts";
+import { DEFAULT_CONFIG, PACKAGE_NAME } from "./types.ts";
+
+const FILE_NAME = "omp-bilingual.json";
+
+function agentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".omp", "agent");
+}
+
+export function configPath(): string {
+  return join(agentDir(), FILE_NAME);
+}
+
+export async function loadConfig(): Promise<PluginConfig> {
+  const lock = await readJsonObject(join(homedir(), ".omp", "plugins", "omp-plugins.lock.json"));
+  const lockSettings =
+    lock.settings && typeof lock.settings === "object" && !Array.isArray(lock.settings)
+      ? ((lock.settings as Record<string, unknown>)[PACKAGE_NAME] as unknown)
+      : undefined;
+  const fromLock =
+    lockSettings && typeof lockSettings === "object" && !Array.isArray(lockSettings)
+      ? (lockSettings as Record<string, unknown>)
+      : {};
+  const file = await readJsonObject(configPath());
+  const merged = { ...fromLock, ...file };
+  return {
+    enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_CONFIG.enabled,
+    backend: asBackend(merged.backend),
+    target: asString(merged.target, DEFAULT_CONFIG.target),
+    deepseekApiKey:
+      env("DEEPSEEK_API_KEY") || asString(merged.deepseekApiKey, "") || DEFAULT_CONFIG.deepseekApiKey,
+    deepseekModel: asString(merged.deepseekModel, DEFAULT_CONFIG.deepseekModel),
+    hunyuanApiKey:
+      env("HUNYUAN_API_KEY") ||
+      env("TOKENHUB_API_KEY") ||
+      asString(merged.hunyuanApiKey, "") ||
+      DEFAULT_CONFIG.hunyuanApiKey,
+    hunyuanBaseUrl: asString(merged.hunyuanBaseUrl, DEFAULT_CONFIG.hunyuanBaseUrl),
+    hunyuanModel: asString(merged.hunyuanModel, DEFAULT_CONFIG.hunyuanModel),
+  };
+}
+
+export async function saveConfig(next: PluginConfig): Promise<void> {
+  await mkdir(agentDir(), { recursive: true });
+  await writeFile(configPath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}
+
+export async function patchConfig(partial: Partial<PluginConfig>): Promise<PluginConfig> {
+  const current = await loadConfig();
+  const next = { ...current, ...partial };
+  await saveConfig(next);
+  return next;
+}
+
+async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function env(name: string): string {
+  return process.env[name]?.trim() ?? "";
+}
+
+function asString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+function asBackend(value: unknown): Backend {
+  return value === "deepseek" || value === "hunyuan" || value === "google" ? value : DEFAULT_CONFIG.backend;
+}
