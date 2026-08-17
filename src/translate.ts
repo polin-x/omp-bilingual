@@ -277,13 +277,12 @@ export async function reviewEnglishPrompt(
         {
           role: "system",
           content: [
-            "You check English for a coding-agent prompt.",
-            "Do not answer the user's technical question.",
+            "You improve a coding-agent prompt. Do not answer the technical question.",
             "Return ONLY JSON: {\"ok\":boolean,\"corrected\":\"...\",\"better\":\"...\",\"note\":\"...\"}.",
-            "ok=true if grammar is already natural.",
-            "corrected: grammatical version of the same request, same meaning. If already fine, repeat the source with only tiny fixes (capitalization, article).",
-            "better: ALWAYS the recommended way to ask this, one sentence, more natural than the source if possible.",
-            "note: one short Chinese sentence about the English, not about the task.",
+            "ok=true if everyday English is already natural.",
+            "corrected: same request with grammar/capitalization fixed. If already fine, copy the source.",
+            "better: ALWAYS a stronger LLM prompt for the same intent: specific goal, constraints, files/area if implied, and desired output shape. 1-3 sentences. Not just prettier English.",
+            "note: one short Chinese sentence on the English and why the prompt is clearer for the model.",
           ].join(" "),
         },
         { role: "user", content: text },
@@ -311,6 +310,7 @@ function parseEnglishReview(raw: string, source: string): EnglishReview | undefi
   const better = "better" in parsed && typeof parsed.better === "string" ? parsed.better.trim() : "";
   const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
   if (note.length > 240 || corrected.length > Math.max(80, source.length * 3)) return undefined;
+  if (better.length > 800) return undefined;
   if (!ok && !corrected) return undefined;
   return { ok, corrected, better, note };
 }

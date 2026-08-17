@@ -145,7 +145,7 @@ export function renderEnglishReview(review: EnglishReview, theme: ThemeLike): Co
   const recommended = review.better || review.corrected;
   const lines = [
     review.ok ? "Looks natural." : review.corrected ? `Corrected: ${review.corrected}` : "",
-    recommended ? `Try: ${recommended}` : "",
+    recommended ? `Try (LLM prompt): ${recommended}` : "",
     review.note,
   ].filter(Boolean);
   return markedZh(lines.join("\n\n"), theme, markdownTheme(theme));
