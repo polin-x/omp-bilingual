@@ -40,7 +40,11 @@ export default function bilingual(pi: ExtensionAPI): void {
       return undefined;
     }
     const view = new EnglishReviewView(theme);
-    const hit = reviews.get(details.source);
+    const fromDetails =
+      "review" in details && details.review && typeof details.review === "object"
+        ? (details.review as EnglishReview)
+        : undefined;
+    const hit = reviews.get(details.source) ?? fromDetails;
     if (hit) view.setReview(hit);
     reviewViews.push(view);
     reviewViewSource.set(view, details.source);
@@ -55,7 +59,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   }));
 
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
-  let sessionIsIdle: (() => boolean) | undefined;
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
   let thinkingTimer: unknown;
@@ -186,18 +189,16 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
-  const postReviewCard = (text: string) => {
-    if (sessionIsIdle && !sessionIsIdle()) return;
-    pi.sendMessage(
-      {
-        customType: REVIEW_TYPE,
-        content: "",
-        display: true,
-        attribution: "agent",
-        details: { source: text },
-      },
-      { triggerTurn: false },
-    );
+  const reviewCard = (text: string) => {
+    const cached = parseCachedReview(paraZh.get(reviewKeyOf(text)) ?? "");
+    if (cached) paintReviews(text, cached);
+    return {
+      customType: REVIEW_TYPE,
+      content: "",
+      display: true as const,
+      attribution: "agent" as const,
+      details: { source: text, review: cached },
+    };
   };
 
   const runEnglishReview = async (text: string) => {
@@ -258,11 +259,19 @@ export default function bilingual(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
-    sessionIsIdle = () => ctx.isIdle();
     liveConfig = await loadConfig();
     const disk = await loadTranslationCache();
     for (const [k, zh] of disk) paraZh.set(k, zh);
     applyUi(ctx.ui);
+  });
+
+  pi.on("before_agent_start", (event) => {
+    if (!liveConfig.enabled || !liveConfig.reviewEnglish) return;
+    if (liveConfig.backend === "google") return;
+    const text = event.prompt.trim();
+    if (!isEnglishPrompt(text)) return;
+    void runEnglishReview(text);
+    return { message: reviewCard(text) };
   });
 
   pi.on("agent_start", () => {
@@ -272,14 +281,7 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("message_end", (event) => {
     if (!liveConfig.enabled) return;
-    if (event.message.role === "user") {
-      if (!liveConfig.reviewEnglish) return;
-      const text = userPromptText(event.message);
-      if (!isEnglishPrompt(text)) return;
-      postReviewCard(text);
-      void runEnglishReview(text);
-      return;
-    }
+    if (event.message.role === "user") return;
     if (event.message.role !== "assistant") return;
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
@@ -431,18 +433,6 @@ function messageHasToolCalls(message: { content?: unknown }): boolean {
   });
 }
 
-function userPromptText(message: { content?: unknown }): string {
-  const content = message.content;
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  const parts: string[] = [];
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue;
-    if (!("type" in block) || !("text" in block)) continue;
-    if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
-  }
-  return parts.join("\n").trim();
-}
 
 function parseCachedReview(raw: string): EnglishReview | undefined {
   try {
