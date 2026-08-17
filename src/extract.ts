@@ -1,6 +1,8 @@
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 const LATIN = /[A-Za-z]/;
+const KANA = /[\u3040-\u30ff]/;
+const HANGUL = /[\uac00-\ud7af\u1100-\u11ff]/;
 const PATH_PREFIX = /^(?:~|\/|\.\/|\.\.\/|[A-Za-z]:[\\/])/;
 const CMD_PREFIX = /^[$#%>]\s+\S/;
 
@@ -75,13 +77,14 @@ export function splitTranslatableParagraphs(source: string): string[] {
 }
 
 export function isTranslatable(text: string): boolean {
-  if (!LATIN.test(text)) return false;
-  if (CJK.test(text) && !enoughEnglish(text)) return false;
   const compact = text.trim();
   if (PATH_PREFIX.test(compact) && /[\\/]/.test(compact.slice(1))) return false;
   if (CMD_PREFIX.test(compact)) return false;
   if (looksLikeMarkdownTable(text)) return false;
   if (looksLikeCode(text)) return false;
+  if (KANA.test(text) || HANGUL.test(text)) return true;
+  if (!LATIN.test(text)) return false;
+  if (CJK.test(text) && !enoughEnglish(text)) return false;
   return true;
 }
 
