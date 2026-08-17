@@ -26,6 +26,10 @@ export default function bilingual(pi: ExtensionAPI): void {
   const paraFailed = new Set<string>();
   const paraBusy = new Set<string>();
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
+  let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
+  let cancelTimer: ((id: unknown) => void) | undefined;
+  let thinkingTimer: unknown;
+  let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
   let ui: ExtensionUIContext | undefined;
   let gifFrames: GifFrame[] = [];
@@ -71,6 +75,18 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
+  const flushThinkingTranslate = () => {
+    thinkingTimer = undefined;
+    const job = thinkingQueued;
+    thinkingQueued = undefined;
+    if (!job) return;
+    void translateFresh(job.paras, job.requestRender).catch((err) => {
+      pi.logger.error("bilingual thinking translate failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
   const showTextWidget = (texts: string[]) => {
     if (!ui) return;
     if (!liveConfig.enabled || !liveConfig.translateText) {
@@ -110,19 +126,25 @@ export default function bilingual(pi: ExtensionAPI): void {
     const paras = open ? [...closed, open] : closed;
     if (paras.length === 0) return undefined;
     lastThinkingRender = () => context.requestRender();
-    const zh = paras
-      .map((p) => paraZh.get(p))
-      .filter((t): t is string => Boolean(t))
-      .join("\n\n");
-    if (!zh) return undefined;
     const view = new ThinkingTranslationView(theme);
     view.setOrnament(liveConfig.ornament);
     view.setGifFrames(gifFrames);
-    view.setZh(zh);
+    const zh = paras.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
+    if (zh) view.setZh(zh);
+    if (!paras.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
+    if (!scheduleTimer) return view;
+    thinkingQueued = { paras, requestRender: lastThinkingRender };
+    if (thinkingTimer != null) {
+      cancelTimer?.(thinkingTimer);
+      thinkingTimer = undefined;
+    }
+    thinkingTimer = scheduleTimer(flushThinkingTranslate, liveConfig.thinkingDebounceMs);
     return view;
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
+    cancelTimer = (id) => ctx.clearTimer(id);
     liveConfig = await loadConfig();
     applyUi(ctx.ui);
     gifFrames = await safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi);
@@ -138,6 +160,12 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("message_end", (event) => {
     if (event.message.role !== "assistant" || !liveConfig.enabled) return;
+    if (thinkingTimer != null) {
+      cancelTimer?.(thinkingTimer);
+      thinkingTimer = undefined;
+    }
+    flushThinkingTranslate();
+    lastThinkingRender?.();
     const sources = extractSourceParagraphs(event.message);
     if (liveConfig.translateThinking) {
       for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
