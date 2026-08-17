@@ -254,6 +254,18 @@ export default function bilingual(pi: ExtensionAPI): void {
     next.setWidget("bilingual-review", undefined);
   };
 
+  const flushThinkingTranslate = () => {
+    thinkingTimer = undefined;
+    const job = thinkingQueued;
+    thinkingQueued = undefined;
+    if (!job) return;
+    void translateFresh(job.paras, job.requestRender).catch((err) => {
+      pi.logger.error("bilingual thinking translate failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
   const queueThinkingTranslate = (paras: string[], requestRender: () => void) => {
     thinkingQueued = { paras, requestRender };
     if (!scheduleTimer) {
