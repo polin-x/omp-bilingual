@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
-import type { Backend, PluginConfig } from "./types.ts";
+import type { Backend, FallbackSlot, PluginConfig } from "./types.ts";
 import { TARGET_LANGUAGES, languageName } from "./types.ts";
 
 export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig | undefined> {
@@ -12,6 +12,8 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "done", description: summarize(cfg) },
       { label: "enabled", description: cfg.enabled ? "on" : "off" },
       { label: "backend", description: cfg.backend },
+      { label: "fallback1", description: cfg.fallback1 },
+      { label: "fallback2", description: cfg.fallback2 },
       { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
@@ -43,6 +45,16 @@ async function editItem(
     const backend = await pickBackend(ctx, cfg.backend);
     if (backend === undefined) return undefined;
     return { ...cfg, backend };
+  }
+  if (item === "fallback1") {
+    const fallback1 = await pickFallback(ctx, "First fallback", cfg.fallback1);
+    if (fallback1 === undefined) return undefined;
+    return { ...cfg, fallback1 };
+  }
+  if (item === "fallback2") {
+    const fallback2 = await pickFallback(ctx, "Second fallback", cfg.fallback2);
+    if (fallback2 === undefined) return undefined;
+    return { ...cfg, fallback2 };
   }
   if (item === "target") {
     const target = await pickOrType(
@@ -148,7 +160,8 @@ async function editMore(ctx: ExtensionContext, cfg: PluginConfig): Promise<Plugi
 function summarize(cfg: PluginConfig): string {
   const on = cfg.enabled ? "on" : "off";
   const think = cfg.translateThinking ? "thinking" : "no-thinking";
-  return `${on} · ${cfg.backend} · ${cfg.target} · ${think}`;
+  const chain = [cfg.backend, cfg.fallback1, cfg.fallback2].filter((s) => s !== "off").join(">");
+  return `${on} · ${chain} · ${cfg.target} · ${think}`;
 }
 
 function providerHint(cfg: PluginConfig): string {
@@ -172,6 +185,24 @@ async function pickBackend(ctx: ExtensionContext, current: Backend): Promise<Bac
     { label: "custom", description: current === "custom" ? "Current · OpenAI-compatible" : "OpenAI-compatible URL + key" },
   ]);
   if (label === "google" || label === "deepseek" || label === "hunyuan" || label === "custom") return label;
+  return undefined;
+}
+
+async function pickFallback(
+  ctx: ExtensionContext,
+  title: string,
+  current: FallbackSlot,
+): Promise<FallbackSlot | undefined> {
+  const label = await ctx.ui.select(title, [
+    { label: "off", description: current === "off" ? "Current · unused" : "Do not fall back" },
+    { label: "google", description: current === "google" ? "Current · free, no key" : "Free, no key" },
+    { label: "deepseek", description: current === "deepseek" ? "Current · needs API key" : "Needs API key" },
+    { label: "hunyuan", description: current === "hunyuan" ? "Current · needs API key" : "Needs API key" },
+    { label: "custom", description: current === "custom" ? "Current · OpenAI-compatible" : "OpenAI-compatible URL + key" },
+  ]);
+  if (label === "off" || label === "google" || label === "deepseek" || label === "hunyuan" || label === "custom") {
+    return label;
+  }
   return undefined;
 }
 

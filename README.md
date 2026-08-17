@@ -75,6 +75,9 @@ omp plugin link /path/to/omp-bilingual
 **Custom**  
 任意 OpenAI 兼容接口。`/bilingual custom` 后在 `settings` → `provider` 填 base URL、key、model。例如 `https://api.openai.com/v1` + `gpt-4o-mini`，或 OpenRouter / 自建 vLLM。
 
+**Fallback**  
+`settings` 里可设 `fallback1`、`fallback2`（`off` / `google` / `deepseek` / `hunyuan` / `custom`）。顺序：主后端 → fallback1 → fallback2。失败（限流、缺 key、网络）才试下一个；重复的后端会跳过。
+
 不要把 json 里的 key 提交进 git。
 
 

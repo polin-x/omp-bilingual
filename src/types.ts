@@ -1,13 +1,14 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const REVIEW_TYPE = "com.omp.bilingual.review";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.35";
+export const PACKAGE_VERSION = "0.1.36";
 
 export type ReviewDetails = {
   source: string;
 };
 
 export type Backend = "google" | "deepseek" | "hunyuan" | "custom";
+export type FallbackSlot = Backend | "off";
 
 export type Pair = {
   en: string;
@@ -25,6 +26,8 @@ export type BilingualDetails = {
 export type PluginConfig = {
   enabled: boolean;
   backend: Backend;
+  fallback1: FallbackSlot;
+  fallback2: FallbackSlot;
   target: string;
   sourceLang: string;
   translateThinking: boolean;
@@ -95,6 +98,8 @@ export function ornamentFrame(value: string, atMs = Date.now()): string {
 export const DEFAULT_CONFIG: PluginConfig = {
   enabled: true,
   backend: "google",
+  fallback1: "off",
+  fallback2: "off",
   target: "zh-CN",
   sourceLang: "auto",
   translateThinking: true,

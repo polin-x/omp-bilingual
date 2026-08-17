@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Backend, PluginConfig } from "./types.ts";
+import type { Backend, FallbackSlot, PluginConfig } from "./types.ts";
 import { DEFAULT_CONFIG, PACKAGE_NAME } from "./types.ts";
 
 const FILE_NAME = "omp-bilingual.json";
@@ -29,6 +29,8 @@ export async function loadConfig(): Promise<PluginConfig> {
   return {
     enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_CONFIG.enabled,
     backend: asBackend(merged.backend),
+    fallback1: asFallback(merged.fallback1),
+    fallback2: asFallback(merged.fallback2),
     target: asString(merged.target, DEFAULT_CONFIG.target),
     sourceLang: asString(merged.sourceLang, DEFAULT_CONFIG.sourceLang),
     translateThinking:
@@ -84,6 +86,13 @@ function asBackend(value: unknown): Backend {
   return value === "deepseek" || value === "hunyuan" || value === "google" || value === "custom"
     ? value
     : DEFAULT_CONFIG.backend;
+}
+
+function asFallback(value: unknown): FallbackSlot {
+  if (value === "off" || value === "deepseek" || value === "hunyuan" || value === "google" || value === "custom") {
+    return value;
+  }
+  return DEFAULT_CONFIG.fallback1;
 }
 
 function asDebounceMs(value: unknown): number {

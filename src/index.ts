@@ -5,7 +5,8 @@ import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, TextCardView, ThinkingTranslationView } from "./render.ts";
 import {
-  describeBackend,
+  backendChain,
+  describeChain,
   looksLikeTranslation,
   reviewEnglishPrompt,
   translateParagraphs,
@@ -223,7 +224,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   };
 
   const runEnglishReview = async (text: string) => {
-    if (liveConfig.backend === "google") return;
+    if (!backendChain(liveConfig).some((b) => b !== "google")) return;
     const cacheKey = reviewKeyOf(text);
     const cached = paraZh.get(cacheKey);
     if (cached) {
@@ -296,7 +297,7 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", (event) => {
     if (!liveConfig.enabled || !liveConfig.reviewEnglish) return;
-    if (liveConfig.backend === "google") return;
+    if (!backendChain(liveConfig).some((b) => b !== "google")) return;
     const text = event.prompt.trim();
     if (!isEnglishPrompt(text)) return;
     void runEnglishReview(text);
@@ -440,22 +441,13 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
 
 function barStatus(config: PluginConfig): string {
   if (!config.enabled) return `译:off ${PACKAGE_VERSION}`;
-  return `译:${describeBackend(config.backend)} ${config.target} ${PACKAGE_VERSION}`;
+  return `译:${describeChain(config)} ${config.target} ${PACKAGE_VERSION}`;
 }
 
 function statusLine(config: PluginConfig): string {
   const on = config.enabled ? "on" : "off";
   const think = config.translateThinking ? "thinking" : "no-thinking";
-  if (config.backend === "deepseek") {
-    return `bilingual ${PACKAGE_VERSION} ${on} · deepseek · ${config.target} · ${config.deepseekModel}${config.deepseekApiKey ? "" : " · no key"} · ${think}`;
-  }
-  if (config.backend === "hunyuan") {
-    return `bilingual ${PACKAGE_VERSION} ${on} · hunyuan · ${config.target} · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"} · ${think}`;
-  }
-  if (config.backend === "custom") {
-    return `bilingual ${PACKAGE_VERSION} ${on} · custom · ${config.target} · ${config.customModel || "no model"} · ${config.customBaseUrl || "no url"}${config.customApiKey ? "" : " · no key"} · ${think}`;
-  }
-  return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.sourceLang}→${config.target} · ${think}`;
+  return `bilingual ${PACKAGE_VERSION} ${on} · ${describeChain(config)} · ${config.target} · ${think}`;
 }
 
 function isBilingualContextMessage(message: { role?: string; customType?: string; content?: unknown }): boolean {

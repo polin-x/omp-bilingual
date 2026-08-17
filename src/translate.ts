@@ -9,21 +9,48 @@ export type EnglishReview = {
 };
 const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 
+export function backendChain(config: PluginConfig): Backend[] {
+  const out: Backend[] = [];
+  for (const slot of [config.backend, config.fallback1, config.fallback2]) {
+    if (slot === "off") continue;
+    if (!out.includes(slot)) out.push(slot);
+  }
+  return out.length > 0 ? out : [config.backend];
+}
+
 export async function translateParagraphs(
   paragraphs: string[],
   config: PluginConfig,
   signal?: AbortSignal,
 ): Promise<Pair[]> {
   if (paragraphs.length === 0) return [];
-  switch (config.backend) {
+  const chain = backendChain(config);
+  let last: unknown;
+  for (const backend of chain) {
+    try {
+      return await translateOnce(paragraphs, config, backend, signal);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last ?? "translation failed"));
+}
+
+async function translateOnce(
+  paragraphs: string[],
+  config: PluginConfig,
+  backend: Backend,
+  signal?: AbortSignal,
+): Promise<Pair[]> {
+  switch (backend) {
     case "google":
       return translateGoogle(paragraphs, config, signal);
     case "deepseek":
     case "hunyuan":
     case "custom":
-      return translateOpenAi(paragraphs, openAiOpts(config), signal);
+      return translateOpenAi(paragraphs, openAiOpts(config, backend), signal);
     default:
-      return unreachable(config.backend);
+      return unreachable(backend);
   }
 }
 
@@ -64,8 +91,8 @@ type OpenAiOpts = {
   target: string;
 };
 
-function openAiOpts(config: PluginConfig): OpenAiOpts {
-  switch (config.backend) {
+function openAiOpts(config: PluginConfig, backend: Backend): OpenAiOpts {
+  switch (backend) {
     case "deepseek":
       return {
         apiKey: config.deepseekApiKey,
@@ -92,7 +119,7 @@ function openAiOpts(config: PluginConfig): OpenAiOpts {
         target: config.target,
       };
     default:
-      throw new Error(`${config.backend} is not an OpenAI-compatible backend`);
+      throw new Error(`${backend} is not an OpenAI-compatible backend`);
   }
 }
 
@@ -261,8 +288,20 @@ export async function reviewEnglishPrompt(
   config: PluginConfig,
   signal?: AbortSignal,
 ): Promise<EnglishReview | undefined> {
-  if (config.backend === "google") return undefined;
-  const opts = openAiOpts(config);
+  const chain = backendChain(config).filter((backend) => backend !== "google");
+  if (chain.length === 0) return undefined;
+  let last: unknown;
+  for (const backend of chain) {
+    try {
+      return await reviewOnce(text, openAiOpts(config, backend), signal);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last ?? "review failed"));
+}
+
+async function reviewOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<EnglishReview | undefined> {
   if (!opts.apiKey) throw new Error(`${opts.name} API key missing`);
   if (!opts.baseUrl) throw new Error(`${opts.name} base URL missing`);
   if (!opts.model) throw new Error(`${opts.name} model missing`);
@@ -330,4 +369,8 @@ export function describeBackend(backend: Backend): string {
     case "custom":
       return "custom";
   }
+}
+
+export function describeChain(config: PluginConfig): string {
+  return backendChain(config).map(describeBackend).join(">");
 }

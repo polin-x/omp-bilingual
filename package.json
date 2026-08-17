@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -17,7 +17,19 @@
         "type": "enum",
         "values": ["google", "deepseek", "hunyuan", "custom"],
         "default": "google",
-        "description": "Translation backend"
+        "description": "Primary translation backend"
+      },
+      "fallback1": {
+        "type": "enum",
+        "values": ["off", "google", "deepseek", "hunyuan", "custom"],
+        "default": "off",
+        "description": "First fallback if the primary backend fails"
+      },
+      "fallback2": {
+        "type": "enum",
+        "values": ["off", "google", "deepseek", "hunyuan", "custom"],
+        "default": "off",
+        "description": "Second fallback if the first fallback fails"
       },
       "target": {
         "type": "string",
