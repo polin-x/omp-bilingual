@@ -27,9 +27,11 @@ export async function translateParagraphs(
   const chain = backendChain(config);
   let last: unknown;
   for (const backend of chain) {
+    if (signal?.aborted) throw abortError(signal);
     try {
       return await translateOnce(paragraphs, config, backend, signal);
     } catch (err) {
+      if (isAbortError(err, signal)) throw err;
       last = err;
     }
   }
@@ -292,9 +294,13 @@ export async function reviewEnglishPrompt(
   if (chain.length === 0) return undefined;
   let last: unknown;
   for (const backend of chain) {
+    if (signal?.aborted) throw abortError(signal);
     try {
-      return await reviewOnce(text, openAiOpts(config, backend), signal);
+      const review = await reviewOnce(text, openAiOpts(config, backend), signal);
+      if (!review) throw new Error(`${backend} returned unusable review`);
+      return review;
     } catch (err) {
+      if (isAbortError(err, signal)) throw err;
       last = err;
     }
   }
@@ -373,4 +379,16 @@ export function describeBackend(backend: Backend): string {
 
 export function describeChain(config: PluginConfig): string {
   return backendChain(config).map(describeBackend).join(">");
+}
+
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return err instanceof Error && (err.name === "AbortError" || err.message.toLowerCase().includes("aborted"));
+}
+
+function abortError(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  const err = new Error("aborted");
+  err.name = "AbortError";
+  return err;
 }
