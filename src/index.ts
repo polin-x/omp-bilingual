@@ -60,7 +60,8 @@ export default function bilingual(pi: ExtensionAPI): void {
       "review" in details && details.review && typeof details.review === "object"
         ? (details.review as EnglishReview)
         : undefined;
-    const hit = reviews.get(details.source) ?? fromDetails;
+    const cached = parseCachedReview(paraZh.get(reviewKeyOf(details.source)) ?? "");
+    const hit = reviews.get(details.source) ?? fromDetails ?? cached;
     if (hit) view.setReview(hit);
     reviewViews.push(view);
     reviewViewSource.set(view, details.source);
@@ -212,6 +213,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     for (const view of reviewViews) {
       if (reviewViewSource.get(view) === source) view.setReview(review);
     }
+    ui?.setStatus("bilingual", barStatus(liveConfig));
   };
 
   const reviewCard = (text: string) => {

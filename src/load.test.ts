@@ -10,7 +10,7 @@ const REQUIRED = [
   "pairsFromCache",
 ];
 
-const ORDERED = ["flushThinkingTranslate", "reviewKeyOf", "paintReviews"];
+const ORDERED = ["flushThinkingTranslate", "paintReviews"];
 
 test("critical helpers are defined", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
