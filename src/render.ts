@@ -3,7 +3,7 @@ import type { Component, MarkdownTheme } from "@oh-my-pi/pi-tui";
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
 import type { BilingualDetails } from "./types.ts";
-import { CUSTOM_TYPE, ornamentFrame } from "./types.ts";
+import { CUSTOM_TYPE } from "./types.ts";
 
 type ThemeLike = {
   fg(color: string, text: string): string;
@@ -53,7 +53,6 @@ export function renderBilingualCard(
 export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Component | undefined {
   const pairs = details.pairs;
   if (pairs.length === 0) return undefined;
-  const ornament = details.ornament ?? "globe";
 
   const mdTheme = markdownTheme(theme);
   const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
@@ -73,30 +72,22 @@ export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Com
         }),
       ),
     );
-    box.addChild(markedZh(pair.zh, theme, mdTheme, ornament, false));
+    box.addChild(markedZh(pair.zh, theme, mdTheme));
     if (i < pairs.length - 1) box.addChild(new Spacer(1));
   }
   box.addChild(new CornerTag(theme.fg("dim", `译·${details.backend}`)));
   return box;
 }
 
-export function renderThinkingTranslation(zh: string, theme: ThemeLike, ornament = "globe"): Component {
-  return markedZh(zh, theme, markdownTheme(theme), ornament, true);
+export function renderThinkingTranslation(zh: string, theme: ThemeLike): Component {
+  return markedZh(zh, theme, markdownTheme(theme));
 }
 
-function markedZh(
-  zh: string,
-  theme: ThemeLike,
-  mdTheme: MarkdownTheme,
-  ornament: string,
-  animate: boolean,
-): Component {
+function markedZh(zh: string, theme: ThemeLike, mdTheme: MarkdownTheme): Component {
   const md = new Markdown(zh, 0, 0, mdTheme, {
     color: (t) => theme.fg("accent", t),
   });
-  return new Prefixed(new Trimmed(md), () =>
-    theme.fg("accent", `${ornamentFrame(ornament, animate ? Date.now() : 0)} `),
-  );
+  return new Prefixed(new Trimmed(md), () => theme.fg("accent", "│ "));
 }
 
 class Trimmed implements Component {
@@ -135,12 +126,7 @@ class Prefixed implements Component {
 
 export class ThinkingTranslationView implements Component {
   #zh = "";
-  #ornament = "globe";
   constructor(private readonly theme: ThemeLike) {}
-
-  setOrnament(ornament: string): void {
-    this.#ornament = ornament;
-  }
 
   setZh(zh: string): void {
     this.#zh = zh;
@@ -150,7 +136,7 @@ export class ThinkingTranslationView implements Component {
 
   render(width: number): readonly string[] {
     if (!this.#zh) return [];
-    return renderThinkingTranslation(this.#zh, this.theme, this.#ornament).render(width);
+    return renderThinkingTranslation(this.#zh, this.theme).render(width);
   }
 }
 
