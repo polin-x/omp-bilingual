@@ -8,6 +8,7 @@ const REQUIRED = [
   "postTextCard",
   "paintTextCards",
   "pairsFromCache",
+  "runEnglishReview",
 ];
 
 const ORDERED = ["flushThinkingTranslate", "paintReviews"];

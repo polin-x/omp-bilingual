@@ -32,6 +32,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   const reviews = new Map<string, EnglishReview>();
   const reviewViews: EnglishReviewView[] = [];
   const reviewViewSource = new WeakMap<EnglishReviewView, string>();
+  const reviewBusy = new Set<string>();
   const textViews: TextCardView[] = [];
   const textViewSource = new WeakMap<TextCardView, string>();
 
@@ -63,6 +64,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     const cached = parseCachedReview(paraZh.get(reviewKeyOf(details.source)) ?? "");
     const hit = reviews.get(details.source) ?? fromDetails ?? cached;
     if (hit) view.setReview(hit);
+    else void runEnglishReview(details.source);
     reviewViews.push(view);
     reviewViewSource.set(view, details.source);
     if (reviewViews.length > 16) reviewViews.shift();
@@ -131,7 +133,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (!looksLikeTranslation(en, zh)) return;
     paraZh.set(keyOf(en), zh);
     if (paraZh.size > 512) {
-      const first = paraZh.keys().next().value;
+      const first = [...paraZh.keys()].find((k) => !k.startsWith("review\t"));
       if (first !== undefined) paraZh.delete(first);
     }
     schedulePersist();
@@ -230,6 +232,7 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   const runEnglishReview = async (text: string) => {
     if (!backendChain(liveConfig).some((b) => b !== "google")) return;
+    if (reviewBusy.has(text)) return;
     const cacheKey = reviewKeyOf(text);
     const cached = paraZh.get(cacheKey);
     if (cached) {
@@ -239,16 +242,23 @@ export default function bilingual(pi: ExtensionAPI): void {
         return;
       }
     }
+    reviewBusy.add(text);
     try {
       const review = await reviewEnglishPrompt(text, liveConfig);
       if (!review) return;
       paraZh.set(cacheKey, JSON.stringify(review));
-      schedulePersist();
+      void saveTranslationCache(paraZh).catch((err) => {
+        pi.logger.error("bilingual cache save failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
       paintReviews(text, review);
     } catch (err) {
       pi.logger.error("bilingual english review failed", {
         err: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      reviewBusy.delete(text);
     }
   };
 
