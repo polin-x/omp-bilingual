@@ -179,27 +179,25 @@ export default function bilingual(pi: ExtensionAPI): void {
       for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
-  const postTextCard = async (texts: string[]): Promise<void> => {
+  const postTextCard = (texts: string[]) => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
     if (texts.length === 0) return;
     if (sessionIsIdle && !sessionIsIdle()) return;
     const pairs = pairsFromCache(texts);
-    await Promise.resolve(
-      pi.sendMessage(
-        {
-          customType: CUSTOM_TYPE,
-          content: "",
-          display: true,
-          attribution: "agent",
-          details: {
-            texts,
-            pairs,
-            backend: liveConfig.backend,
-            ornament: liveConfig.ornament,
-          },
+    pi.sendMessage(
+      {
+        customType: CUSTOM_TYPE,
+        content: "",
+        display: true,
+        attribution: "agent",
+        details: {
+          texts,
+          pairs,
+          backend: liveConfig.backend,
+          ornament: liveConfig.ornament,
         },
-        { triggerTurn: false, deliverAs: "nextTurn" },
-      ) as void | Promise<void>,
+      },
+      { triggerTurn: false, deliverAs: "nextTurn" },
     );
   };
 
@@ -335,11 +333,11 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("agent_end", async (event) => {
+  pi.on("agent_end", (event) => {
     if (event.willContinue) return;
     const { thinking, texts } = pendingHarvest;
     pendingHarvest = { thinking: [], texts: [] };
-    if (texts.length > 0) await postTextCard(texts);
+    if (texts.length > 0) postTextCard(texts);
     const paras = [...thinking, ...texts];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
