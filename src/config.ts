@@ -6,7 +6,7 @@ import { DEFAULT_CONFIG, PACKAGE_NAME } from "./types.ts";
 
 const FILE_NAME = "omp-bilingual.json";
 
-function agentDir(): string {
+export function agentDir(): string {
   return process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".omp", "agent");
 }
 

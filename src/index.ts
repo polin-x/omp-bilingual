@@ -1,9 +1,10 @@
 import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
+import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { renderBilingualCard, renderPairCard, ThinkingTranslationView } from "./render.ts";
-import { describeBackend, translateParagraphs } from "./translate.ts";
+import { describeBackend, looksLikeTranslation, translateParagraphs } from "./translate.ts";
 import {
   CUSTOM_TYPE,
   DEFAULT_CONFIG,
@@ -29,29 +30,62 @@ export default function bilingual(pi: ExtensionAPI): void {
   let thinkingTimer: unknown;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
+  let liveThinkingView: ThinkingTranslationView | undefined;
+  let liveThinkingParas: string[] = [];
+  let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
   let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
 
+  const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
+
+  const cachedZh = (en: string) => paraZh.get(keyOf(en));
+
+  const schedulePersist = () => {
+    if (!scheduleTimer) return;
+    if (persistTimer != null) cancelTimer?.(persistTimer);
+    persistTimer = scheduleTimer(() => {
+      persistTimer = undefined;
+      void saveTranslationCache(paraZh).catch((err) => {
+        pi.logger.error("bilingual cache save failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }, 400);
+  };
+
   const rememberZh = (en: string, zh: string) => {
-    paraZh.set(en, zh);
-    if (paraZh.size > 128) {
+    if (!looksLikeTranslation(en, zh)) return;
+    paraZh.set(keyOf(en), zh);
+    if (paraZh.size > 512) {
       const first = paraZh.keys().next().value;
       if (first !== undefined) paraZh.delete(first);
     }
+    schedulePersist();
   };
 
   const rememberFail = (en: string) => {
-    paraFailed.add(en);
+    paraFailed.add(keyOf(en));
     if (paraFailed.size > 64) {
       const first = paraFailed.values().next().value;
       if (first !== undefined) paraFailed.delete(first);
     }
   };
 
+  const paintThinking = () => {
+    if (!liveThinkingView) return;
+    const zh = liveThinkingParas.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
+    liveThinkingView.setZh(zh);
+    lastThinkingRender?.();
+  };
+
   const translateFresh = async (paras: string[], requestRender?: () => void): Promise<Pair[]> => {
-    const fresh = paras.filter((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p));
-    if (fresh.length === 0) return [];
-    for (const p of fresh) paraBusy.add(p);
+    const fresh = paras.filter((p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)));
+    if (fresh.length === 0) {
+      requestRender?.();
+      paintThinking();
+      return [];
+    }
+    for (const p of fresh) paraBusy.add(keyOf(p));
     try {
       if (!liveConfig.enabled) return [];
       const pairs = await translateParagraphs(fresh, liveConfig);
@@ -62,13 +96,14 @@ export default function bilingual(pi: ExtensionAPI): void {
           out.push(pair);
         }
       }
+      paintThinking();
       requestRender?.();
       return out;
     } catch (err) {
       for (const p of fresh) rememberFail(p);
       throw err;
     } finally {
-      for (const p of fresh) paraBusy.delete(p);
+      for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
 
@@ -92,7 +127,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
     const pairs: Pair[] = [];
     for (const en of texts) {
-      const zh = paraZh.get(en);
+      const zh = cachedZh(en);
       if (zh) pairs.push({ en, zh, kind: "text" });
     }
     if (pairs.length === 0) {
@@ -125,11 +160,15 @@ export default function bilingual(pi: ExtensionAPI): void {
     lastThinkingRender = () => context.requestRender();
     const view = new ThinkingTranslationView(theme);
     view.setOrnament(liveConfig.ornament);
-    const zh = paras.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
+    liveThinkingView = view;
+    liveThinkingParas = paras;
+    const zh = paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh);
-    if (!paras.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
-    if (!scheduleTimer) return view;
-    thinkingQueued = { paras, requestRender: lastThinkingRender };
+    const freshClosed = closed.filter(
+      (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
+    );
+    if (freshClosed.length === 0 || !scheduleTimer) return view;
+    thinkingQueued = { paras: freshClosed, requestRender: lastThinkingRender };
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
       thinkingTimer = undefined;
@@ -142,8 +181,11 @@ export default function bilingual(pi: ExtensionAPI): void {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
     liveConfig = await loadConfig();
+    const disk = await loadTranslationCache();
+    for (const [k, zh] of disk) paraZh.set(k, zh);
     applyUi(ctx.ui);
   });
+
   pi.on("agent_start", () => {
     pendingHarvest = { thinking: [], texts: [] };
     ui?.setWidget("bilingual", undefined);
@@ -156,13 +198,19 @@ export default function bilingual(pi: ExtensionAPI): void {
       thinkingTimer = undefined;
     }
     flushThinkingTranslate();
-    lastThinkingRender?.();
     const sources = extractSourceParagraphs(event.message);
     if (liveConfig.translateThinking) {
       for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
     }
     if (liveConfig.translateText && !messageHasToolCalls(event.message)) {
       for (const s of sources) if (s.kind === "text") pendingHarvest.texts.push(s.text);
+    }
+    if (pendingHarvest.thinking.length > 0) {
+      void translateFresh(pendingHarvest.thinking, lastThinkingRender).catch((err) => {
+        pi.logger.error("bilingual thinking translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   });
 
