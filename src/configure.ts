@@ -81,6 +81,11 @@ async function editItem(
       })),
     );
     if (picked === undefined) return undefined;
+    if (picked === "gif" || picked === "lulu") {
+      const gif = await ctx.ui.input("Lulu / ornament GIF path", cfg.ornamentGif);
+      if (gif === undefined) return undefined;
+      return { ...cfg, ornament: picked, ornamentGif: gif.trim() };
+    }
     return { ...cfg, ornament: picked };
   }
   if (item === "provider") return editProvider(ctx, cfg);

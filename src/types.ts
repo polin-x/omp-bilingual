@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.12";
+export const PACKAGE_VERSION = "0.1.13";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 
@@ -24,6 +24,7 @@ export type PluginConfig = {
   translateThinking: boolean;
   translateText: boolean;
   ornament: string;
+  ornamentGif: string;
   thinkingDebounceMs: number;
   deepseekApiKey: string;
   deepseekModel: string;
@@ -65,6 +66,7 @@ export const ORNAMENT_PRESETS: OrnamentSpec[] = [
   { id: "globe", name: "globe", frames: ["🌍", "🌎", "🌏"] },
   { id: "shinchan", name: "shinchan", frames: ["小新", "小☆", "☆新", "小新"] },
   { id: "lulu", name: "lulu", frames: ["✧🧡", "+🧡", "×🧡", "+🧡"] },
+  { id: "gif", name: "gif", frames: ["GIF"] },
 ];
 export function resolveOrnament(value: string): OrnamentSpec {
   const raw = value.trim() || "globe";
@@ -87,6 +89,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   translateThinking: true,
   translateText: true,
   ornament: "globe",
+  ornamentGif: "",
   thinkingDebounceMs: 2000,
   deepseekApiKey: "",
   deepseekModel: "deepseek-v4-flash",
