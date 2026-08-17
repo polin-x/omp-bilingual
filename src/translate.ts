@@ -130,7 +130,7 @@ async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: 
     choices?: Array<{ message?: { content?: string } }>;
   };
   const content = payload.choices?.[0]?.message?.content ?? "";
-  const zhList = parseTranslationList(content, paragraphs.length);
+  const zhList = parseTranslationList(content, paragraphs.length).map((zh, i) => stripEchoedIndex(zh, i));
   const pairs: Pair[] = [];
   const n = Math.min(paragraphs.length, zhList.length);
   for (let i = 0; i < n; i++) {
@@ -208,8 +208,12 @@ function systemPrompt(target: string): string {
     "Prefer programmer Chinese. marketplace = 插件市场, never 市场推广. push = 推送. commit = 提交.",
     "hook = 钩子; renderer = 渲染器; extension/plugin = 扩展/插件; session = 会话; cache = 缓存.",
     "Do not translate code, paths, commands, identifiers, or version numbers.",
-    "Return ONLY a JSON array of strings, same length and order. No markdown, no commentary.",
+    "Return ONLY a JSON array of strings, same length and order. Each string is the translation only — no paragraph numbers, no markdown, no commentary.",
   ].join(" ");
+}
+
+function stripEchoedIndex(text: string, index: number): string {
+  return text.replace(new RegExp(`^\\s*${index + 1}[.)、]\\s*`), "").trim();
 }
 
 function applyTechGlossary(en: string, zh: string): string {

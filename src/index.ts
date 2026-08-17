@@ -53,9 +53,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("context", (event) => ({
-    messages: event.messages.filter(
-      (m) => !(m.role === "custom" && (m.customType === CUSTOM_TYPE || m.customType === REVIEW_TYPE)),
-    ),
+    messages: event.messages.filter((m) => !isBilingualContextMessage(m)),
   }));
 
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
@@ -427,6 +425,12 @@ function statusLine(config: PluginConfig): string {
     return `bilingual ${PACKAGE_VERSION} ${on} · custom · ${config.target} · ${config.customModel || "no model"} · ${config.customBaseUrl || "no url"}${config.customApiKey ? "" : " · no key"} · ${think}`;
   }
   return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.sourceLang}→${config.target} · ${think}`;
+}
+
+function isBilingualContextMessage(message: { role?: string; customType?: string; content?: unknown }): boolean {
+  if (message.role !== "custom") return false;
+  const type = message.customType ?? "";
+  return type === CUSTOM_TYPE || type === REVIEW_TYPE || type.startsWith("com.omp.bilingual");
 }
 
 function messageHasToolCalls(message: { content?: unknown }): boolean {
