@@ -55,7 +55,7 @@ async function translateGoogle(paragraphs: string[], config: PluginConfig, signa
     const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Google Translate HTTP ${res.status}`);
     const body: unknown = await res.json();
-    pairs.push({ en, zh: restoreMarkup(flattenGoogle(body), tokens) });
+    pairs.push({ en, zh: applyTechGlossary(en, restoreMarkup(flattenGoogle(body), tokens)) });
   }
   return pairs;
 }
@@ -96,11 +96,7 @@ async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: 
       messages: [
         {
           role: "system",
-          content:
-            `Translate each numbered paragraph into ${languageName(opts.target)}. ` +
-            "Use only the text of that paragraph. Do not infer prior conversation, user intent, or missing context. " +
-            "Return ONLY a JSON array of strings, same length and order. " +
-            "Do not translate code, paths, commands, or identifiers. Keep those tokens intact.",
+          content: systemPrompt(opts.target),
         },
         { role: "user", content: numbered },
       ],
@@ -119,7 +115,7 @@ async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: 
   const n = Math.min(paragraphs.length, zhList.length);
   for (let i = 0; i < n; i++) {
     const en = paragraphs[i] ?? "";
-    const zh = restoreMarkup((zhList[i] ?? "").trim(), protectedParas[i]?.tokens ?? []);
+    const zh = applyTechGlossary(en, restoreMarkup((zhList[i] ?? "").trim(), protectedParas[i]?.tokens ?? []));
     if (en && zh) pairs.push({ en, zh });
   }
   if (pairs.length === 0) throw new Error(`${opts.name} returned no usable translations`);
@@ -181,6 +177,33 @@ function fitList(list: string[], expected: number, fallback: string): string[] {
 
 function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+function systemPrompt(target: string): string {
+  return [
+    `Translate each numbered paragraph into ${languageName(target)}.`,
+    "Domain: software engineering in a coding-agent TUI (git, plugins, terminals, APIs).",
+    "Prefer programmer Chinese. Read words as technical terms first, marketing second.",
+    "marketplace = 插件市场 / 扩展市场, never 市场推广.",
+    "push = 推送 (git/release), not 推广.",
+    "commit = 提交; hook = 钩子; renderer = 渲染器; extension/plugin = 扩展/插件;",
+    "card = 卡片; transcript = 会话记录; session = 会话; idle = 空闲; flush = 刷出; debounce = 去抖.",
+    "Use only the text of that paragraph. Do not infer prior conversation or missing context.",
+    "Do not translate code, paths, commands, identifiers, or version numbers.",
+    "Return ONLY a JSON array of strings, same length and order.",
+  ].join(" ");
+}
+
+function applyTechGlossary(en: string, zh: string): string {
+  let out = zh;
+  if (/marketplace/i.test(en)) {
+    out = out.replaceAll("市场推广", "推送到插件市场");
+    out = out.replaceAll("市集", "插件市场");
+  }
+  if (/\bpush\b/i.test(en) && out.includes("推广") && !out.includes("推送")) {
+    out = out.replaceAll("推广", "推送");
+  }
+  return out;
 }
 
 function protectMarkup(text: string): { masked: string; tokens: string[] } {

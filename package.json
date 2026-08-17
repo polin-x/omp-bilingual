@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "type": "module",
   "license": "MIT",
   "description": "Paragraph-level Chinese/English cards for English assistant replies",
