@@ -3,7 +3,7 @@ import { loadTranslationCache, saveTranslationCache, translationKey } from "./ca
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
-import { renderBilingualCard, renderEnglishReview, renderPairCard, ThinkingTranslationView } from "./render.ts";
+import { renderBilingualCard, renderPairCard, EnglishReviewView, ThinkingTranslationView } from "./render.ts";
 import {
   describeBackend,
   looksLikeTranslation,
@@ -15,6 +15,7 @@ import {
   CUSTOM_TYPE,
   DEFAULT_CONFIG,
   PACKAGE_VERSION,
+  REVIEW_TYPE,
   type Backend,
   type BilingualDetails,
   type Pair,
@@ -24,13 +25,37 @@ import {
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
 
-  // Old sessions may still contain cards. Render them; we never write new ones.
-  pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => renderBilingualCard(message, theme));
-
   const paraZh = new Map<string, string>();
   const paraFailed = new Set<string>();
   const paraBusy = new Set<string>();
+  const reviews = new Map<string, EnglishReview>();
+  const reviewViews: EnglishReviewView[] = [];
+  const reviewViewSource = new WeakMap<EnglishReviewView, string>();
+
+  pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => renderBilingualCard(message, theme));
+  pi.registerMessageRenderer(REVIEW_TYPE, (message, _opts, theme) => {
+    if (message.customType !== REVIEW_TYPE) return undefined;
+    const details = message.details;
+    if (!details || typeof details !== "object" || !("source" in details) || typeof details.source !== "string") {
+      return undefined;
+    }
+    const view = new EnglishReviewView(theme);
+    const hit = reviews.get(details.source);
+    if (hit) view.setReview(hit);
+    reviewViews.push(view);
+    reviewViewSource.set(view, details.source);
+    if (reviewViews.length > 16) reviewViews.shift();
+    return view;
+  });
+
+  pi.on("context", (event) => ({
+    messages: event.messages.filter(
+      (m) => !(m.role === "custom" && (m.customType === CUSTOM_TYPE || m.customType === REVIEW_TYPE)),
+    ),
+  }));
+
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
+  let sessionIsIdle: (() => boolean) | undefined;
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
   let thinkingTimer: unknown;
@@ -154,27 +179,44 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
 
+  const paintReviews = (source: string, review: EnglishReview) => {
+    reviews.set(source, review);
+    for (const view of reviewViews) {
+      if (reviewViewSource.get(view) === source) view.setReview(review);
+    }
+  };
+
+  const postReviewCard = (text: string) => {
+    if (sessionIsIdle && !sessionIsIdle()) return;
+    pi.sendMessage(
+      {
+        customType: REVIEW_TYPE,
+        content: "",
+        display: true,
+        attribution: "agent",
+        details: { source: text },
+      },
+      { triggerTurn: false },
+    );
+  };
+
   const runEnglishReview = async (text: string) => {
-    if (!ui || liveConfig.backend === "google") return;
+    if (liveConfig.backend === "google") return;
     const cacheKey = reviewKeyOf(text);
     const cached = paraZh.get(cacheKey);
     if (cached) {
       const review = parseCachedReview(cached);
       if (review) {
-        ui.setWidget("bilingual-review", (_tui, theme) => renderEnglishReview(review, theme), {
-          placement: "aboveEditor",
-        });
+        paintReviews(text, review);
         return;
       }
     }
     try {
       const review = await reviewEnglishPrompt(text, liveConfig);
-      if (!review || !ui) return;
+      if (!review) return;
       paraZh.set(cacheKey, JSON.stringify(review));
       schedulePersist();
-      ui.setWidget("bilingual-review", (_tui, theme) => renderEnglishReview(review, theme), {
-        placement: "aboveEditor",
-      });
+      paintReviews(text, review);
     } catch (err) {
       pi.logger.error("bilingual english review failed", {
         err: err instanceof Error ? err.message : String(err),
@@ -186,7 +228,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     ui = next;
     next.setStatus("bilingual", barStatus(liveConfig));
     if (!liveConfig.enabled || !liveConfig.translateText) next.setWidget("bilingual", undefined);
-    if (!liveConfig.enabled || !liveConfig.reviewEnglish) next.setWidget("bilingual-review", undefined);
+    next.setWidget("bilingual-review", undefined);
   };
 
   pi.registerAssistantThinkingRenderer((context, theme) => {
@@ -216,6 +258,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
+    sessionIsIdle = () => ctx.isIdle();
     liveConfig = await loadConfig();
     const disk = await loadTranslationCache();
     for (const [k, zh] of disk) paraZh.set(k, zh);
@@ -233,6 +276,7 @@ export default function bilingual(pi: ExtensionAPI): void {
       if (!liveConfig.reviewEnglish) return;
       const text = userPromptText(event.message);
       if (!isEnglishPrompt(text)) return;
+      postReviewCard(text);
       void runEnglishReview(text);
       return;
     }

@@ -151,6 +151,23 @@ export function renderEnglishReview(review: EnglishReview, theme: ThemeLike): Co
   return markedZh(lines.join("\n\n"), theme, markdownTheme(theme));
 }
 
+export class EnglishReviewView implements Component {
+  #review: EnglishReview | undefined;
+  constructor(private readonly theme: ThemeLike) {}
+
+  setReview(review: EnglishReview): void {
+    this.#review = review;
+  }
+
+  invalidate(): void {}
+
+  render(width: number): readonly string[] {
+    if (!this.#review) return [];
+    return renderEnglishReview(this.#review, this.theme).render(width);
+  }
+}
+
+
 function markdownTheme(theme: ThemeLike): MarkdownTheme {
   return {
     heading: (text) => theme.fg("text", text),
