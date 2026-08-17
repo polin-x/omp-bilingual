@@ -142,13 +142,12 @@ export class ThinkingTranslationView implements Component {
 }
 
 export function renderEnglishReview(review: EnglishReview, theme: ThemeLike): Component {
-  const lines = review.ok
-    ? [`Looks natural.`, review.note].filter(Boolean)
-    : [
-        review.corrected ? `Corrected: ${review.corrected}` : "",
-        review.better && review.better !== review.corrected ? `Clearer: ${review.better}` : "",
-        review.note,
-      ].filter(Boolean);
+  const recommended = review.better || review.corrected;
+  const lines = [
+    review.ok ? "Looks natural." : review.corrected ? `Corrected: ${review.corrected}` : "",
+    recommended ? `Try: ${recommended}` : "",
+    review.note,
+  ].filter(Boolean);
   return markedZh(lines.join("\n\n"), theme, markdownTheme(theme));
 }
 
