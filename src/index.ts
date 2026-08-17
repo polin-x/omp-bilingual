@@ -2,8 +2,6 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
-import { loadGifFrames, type GifFrame } from "./gif.ts";
-import { ornamentMediaPath, prepareOrnamentGif } from "./ornament-store.ts";
 import { renderBilingualCard, renderPairCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
 import {
@@ -32,7 +30,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
   let ui: ExtensionUIContext | undefined;
-  let gifFrames: GifFrame[] = [];
   let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
 
   const rememberZh = (en: string, zh: string) => {
@@ -128,7 +125,6 @@ export default function bilingual(pi: ExtensionAPI): void {
     lastThinkingRender = () => context.requestRender();
     const view = new ThinkingTranslationView(theme);
     view.setOrnament(liveConfig.ornament);
-    view.setGifFrames(gifFrames);
     const zh = paras.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh);
     if (!paras.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
@@ -147,12 +143,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     cancelTimer = (id) => ctx.clearTimer(id);
     liveConfig = await loadConfig();
     applyUi(ctx.ui);
-    gifFrames = await safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi);
-    ctx.setInterval(() => {
-      lastThinkingRender?.();
-    }, gifFrames.length > 1 ? 90 : 220);
   });
-
   pi.on("agent_start", () => {
     pendingHarvest = { thinking: [], texts: [] };
     ui?.setWidget("bilingual", undefined);
@@ -215,9 +206,6 @@ export default function bilingual(pi: ExtensionAPI): void {
         if (!next) return;
         liveConfig = next;
         applyUi(ctx.ui);
-        void safeLoadGif(ornamentMediaPath(next.ornament, next.ornamentGif), pi).then((frames) => {
-          gifFrames = frames;
-        });
         ctx.ui.notify(statusLine(next), "info");
         return;
       }
@@ -305,19 +293,4 @@ function messageHasToolCalls(message: { content?: unknown }): boolean {
     if (!block || typeof block !== "object" || !("type" in block)) return false;
     return block.type === "toolCall" || block.type === "tool_call";
   });
-}
-
-async function safeLoadGif(path: string, pi: ExtensionAPI): Promise<GifFrame[]> {
-  const file = path.trim();
-  if (!file) return [];
-  try {
-    const gif = await prepareOrnamentGif(file);
-    return await loadGifFrames(gif);
-  } catch (err) {
-    pi.logger.error("bilingual gif load failed", {
-      path: file,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return [];
-  }
 }

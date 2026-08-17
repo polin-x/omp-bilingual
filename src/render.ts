@@ -1,9 +1,8 @@
-import { Box, Image, Markdown, Spacer } from "@oh-my-pi/pi-tui";
+import { Box, Markdown, Spacer } from "@oh-my-pi/pi-tui";
 import type { Component, MarkdownTheme } from "@oh-my-pi/pi-tui";
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
 import type { BilingualDetails } from "./types.ts";
-import type { GifFrame } from "./gif.ts";
 import { CUSTOM_TYPE, ornamentFrame } from "./types.ts";
 
 type ThemeLike = {
@@ -137,15 +136,10 @@ class Prefixed implements Component {
 export class ThinkingTranslationView implements Component {
   #zh = "";
   #ornament = "globe";
-  #frames: GifFrame[] = [];
   constructor(private readonly theme: ThemeLike) {}
 
   setOrnament(ornament: string): void {
     this.#ornament = ornament;
-  }
-
-  setGifFrames(frames: GifFrame[]): void {
-    this.#frames = frames;
   }
 
   setZh(zh: string): void {
@@ -156,27 +150,8 @@ export class ThinkingTranslationView implements Component {
 
   render(width: number): readonly string[] {
     if (!this.#zh) return [];
-    const text = renderThinkingTranslation(this.#zh, this.theme, this.#frames.length > 0 ? "bar" : this.#ornament);
-    if (this.#frames.length === 0) return text.render(width);
-    const frame = frameAt(this.#frames, Date.now());
-    const icon = new Image(
-      frame.pngBase64,
-      "image/png",
-      { fallbackColor: (t) => this.theme.fg("accent", t) },
-      { maxWidthCells: 4, maxHeightCells: 3, filename: "ornament.gif" },
-    );
-    return [...icon.render(width), ...text.render(width)];
+    return renderThinkingTranslation(this.#zh, this.theme, this.#ornament).render(width);
   }
-}
-
-function frameAt(frames: GifFrame[], atMs: number): GifFrame {
-  const total = frames.reduce((sum, frame) => sum + frame.delayMs, 0) || 1;
-  let t = atMs % total;
-  for (const frame of frames) {
-    if (t < frame.delayMs) return frame;
-    t -= frame.delayMs;
-  }
-  return frames[0]!;
 }
 
 function markdownTheme(theme: ThemeLike): MarkdownTheme {
