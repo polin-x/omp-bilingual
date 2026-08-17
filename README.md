@@ -72,6 +72,9 @@ omp plugin link /path/to/omp-bilingual
 **腾讯混元**  
 `configure` 里填 key。Base URL 可选官方 `https://api.hunyuan.cloud.tencent.com/v1` 或 TokenHub `https://tokenhub.tencentmaas.com/v1`，模型可选 `hunyuan-turbos-latest` / `hy3` 或自定义。
 
+**Custom**  
+任意 OpenAI 兼容接口。`/bilingual custom` 后在 `settings` → `provider` 填 base URL、key、model。例如 `https://api.openai.com/v1` + `gpt-4o-mini`，或 OpenRouter / 自建 vLLM。
+
 不要把 json 里的 key 提交进 git。
 
 

@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -15,7 +15,7 @@
       },
       "backend": {
         "type": "enum",
-        "values": ["google", "deepseek", "hunyuan"],
+        "values": ["google", "deepseek", "hunyuan", "custom"],
         "default": "google",
         "description": "Translation backend"
       },
@@ -78,6 +78,21 @@
         "type": "string",
         "default": "hunyuan-turbos-latest",
         "description": "Hunyuan model id"
+      },
+      "customApiKey": {
+        "type": "string",
+        "secret": true,
+        "description": "Custom OpenAI-compatible API key (set via /bilingual settings)"
+      },
+      "customBaseUrl": {
+        "type": "string",
+        "default": "",
+        "description": "Custom OpenAI-compatible base URL, e.g. https://api.openai.com/v1"
+      },
+      "customModel": {
+        "type": "string",
+        "default": "",
+        "description": "Custom model id"
       }
     }
   }

@@ -19,30 +19,9 @@ export async function translateParagraphs(
     case "google":
       return translateGoogle(paragraphs, config, signal);
     case "deepseek":
-      return translateOpenAi(
-        paragraphs,
-        {
-          apiKey: config.deepseekApiKey,
-          baseUrl: "https://api.deepseek.com",
-          model: config.deepseekModel,
-          name: "DeepSeek",
-          disableThinking: true,
-          target: config.target,
-        },
-        signal,
-      );
     case "hunyuan":
-      return translateOpenAi(
-        paragraphs,
-        {
-          apiKey: config.hunyuanApiKey,
-          baseUrl: config.hunyuanBaseUrl,
-          model: config.hunyuanModel,
-          name: "Hunyuan",
-          target: config.target,
-        },
-        signal,
-      );
+    case "custom":
+      return translateOpenAi(paragraphs, openAiOpts(config), signal);
     default:
       return unreachable(config.backend);
   }
@@ -85,8 +64,42 @@ type OpenAiOpts = {
   target: string;
 };
 
+function openAiOpts(config: PluginConfig): OpenAiOpts {
+  switch (config.backend) {
+    case "deepseek":
+      return {
+        apiKey: config.deepseekApiKey,
+        baseUrl: "https://api.deepseek.com",
+        model: config.deepseekModel,
+        name: "DeepSeek",
+        disableThinking: true,
+        target: config.target,
+      };
+    case "hunyuan":
+      return {
+        apiKey: config.hunyuanApiKey,
+        baseUrl: config.hunyuanBaseUrl,
+        model: config.hunyuanModel,
+        name: "Hunyuan",
+        target: config.target,
+      };
+    case "custom":
+      return {
+        apiKey: config.customApiKey,
+        baseUrl: config.customBaseUrl,
+        model: config.customModel,
+        name: "Custom",
+        target: config.target,
+      };
+    default:
+      throw new Error(`${config.backend} is not an OpenAI-compatible backend`);
+  }
+}
+
 async function translateOpenAi(paragraphs: string[], opts: OpenAiOpts, signal?: AbortSignal): Promise<Pair[]> {
   if (!opts.apiKey) throw new Error(`${opts.name} API key missing`);
+  if (!opts.baseUrl) throw new Error(`${opts.name} base URL missing`);
+  if (!opts.model) throw new Error(`${opts.name} model missing`);
   const protectedParas = paragraphs.map((p) => protectMarkup(p));
   const numbered = protectedParas.map((p, i) => `${i + 1}. ${p.masked}`).join("\n\n");
   const res = await fetch(joinUrl(opts.baseUrl, "chat/completions"), {
@@ -245,23 +258,10 @@ export async function reviewEnglishPrompt(
   signal?: AbortSignal,
 ): Promise<EnglishReview | undefined> {
   if (config.backend === "google") return undefined;
-  const opts =
-    config.backend === "deepseek"
-      ? {
-          apiKey: config.deepseekApiKey,
-          baseUrl: "https://api.deepseek.com",
-          model: config.deepseekModel,
-          name: "DeepSeek",
-          disableThinking: true,
-        }
-      : {
-          apiKey: config.hunyuanApiKey,
-          baseUrl: config.hunyuanBaseUrl,
-          model: config.hunyuanModel,
-          name: "Hunyuan",
-          disableThinking: false,
-        };
+  const opts = openAiOpts(config);
   if (!opts.apiKey) throw new Error(`${opts.name} API key missing`);
+  if (!opts.baseUrl) throw new Error(`${opts.name} base URL missing`);
+  if (!opts.model) throw new Error(`${opts.name} model missing`);
   const res = await fetch(joinUrl(opts.baseUrl, "chat/completions"), {
     method: "POST",
     signal,
@@ -323,5 +323,7 @@ export function describeBackend(backend: Backend): string {
       return "deepseek";
     case "hunyuan":
       return "hunyuan";
+    case "custom":
+      return "custom";
   }
 }

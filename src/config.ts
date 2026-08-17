@@ -47,6 +47,9 @@ export async function loadConfig(): Promise<PluginConfig> {
     hunyuanApiKey: asString(merged.hunyuanApiKey, DEFAULT_CONFIG.hunyuanApiKey),
     hunyuanBaseUrl: asString(merged.hunyuanBaseUrl, DEFAULT_CONFIG.hunyuanBaseUrl),
     hunyuanModel: asString(merged.hunyuanModel, DEFAULT_CONFIG.hunyuanModel),
+    customApiKey: asString(merged.customApiKey, DEFAULT_CONFIG.customApiKey),
+    customBaseUrl: asString(merged.customBaseUrl, DEFAULT_CONFIG.customBaseUrl),
+    customModel: asString(merged.customModel, DEFAULT_CONFIG.customModel),
   };
 }
 
@@ -78,7 +81,9 @@ function asString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 function asBackend(value: unknown): Backend {
-  return value === "deepseek" || value === "hunyuan" || value === "google" ? value : DEFAULT_CONFIG.backend;
+  return value === "deepseek" || value === "hunyuan" || value === "google" || value === "custom"
+    ? value
+    : DEFAULT_CONFIG.backend;
 }
 
 function asDebounceMs(value: unknown): number {

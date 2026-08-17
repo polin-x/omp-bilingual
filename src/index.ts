@@ -369,10 +369,11 @@ const SUBCOMMANDS = [
   { name: "google", description: "Switch to free Google Translate" },
   { name: "deepseek", description: "Switch to DeepSeek (set key in settings first)" },
   { name: "hunyuan", description: "Switch to Hunyuan (set key in settings first)" },
+  { name: "custom", description: "Switch to a custom OpenAI-compatible provider" },
   { name: "update", description: "How to upgrade this plugin" },
 ];
 async function applyCommand(args: string): Promise<PluginConfig | string> {
-  const [cmd = "", ...rest] = args.split(/\s+/).filter(Boolean);
+  const [cmd, ...rest] = args.trim().split(/\s+/);
   if (cmd === "update") {
     return [
       `installed ${PACKAGE_VERSION}`,
@@ -381,16 +382,16 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
       "  omp plugin upgrade bilingual@polin-plugins",
     ].join("\n");
   }
-  if (!cmd || cmd === "status" || cmd === "version") return statusLine(await loadConfig());
+  if (!cmd || cmd === "status" || cmd === "version") return loadConfig();
   if (cmd === "on") return patchConfig({ enabled: true });
   if (cmd === "off") return patchConfig({ enabled: false });
-  if (cmd === "google" || cmd === "deepseek" || cmd === "hunyuan") {
+  if (cmd === "google" || cmd === "deepseek" || cmd === "hunyuan" || cmd === "custom") {
     return patchConfig({ backend: cmd });
   }
   if (cmd === "backend") {
     const value = rest[0];
-    if (value !== "google" && value !== "deepseek" && value !== "hunyuan") {
-      return "用法: /bilingual backend google|deepseek|hunyuan";
+    if (value !== "google" && value !== "deepseek" && value !== "hunyuan" && value !== "custom") {
+      return "用法: /bilingual backend google|deepseek|hunyuan|custom";
     }
     return patchConfig({ backend: value satisfies Backend });
   }
@@ -404,7 +405,7 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
     "  /bilingual settings",
     "  /bilingual on|off|status|version|update",
     "  /bilingual target zh-CN|ja|en|…",
-    "  /bilingual google|deepseek|hunyuan",
+    "  /bilingual google|deepseek|hunyuan|custom",
   ].join("\n");
 }
 
@@ -421,6 +422,9 @@ function statusLine(config: PluginConfig): string {
   }
   if (config.backend === "hunyuan") {
     return `bilingual ${PACKAGE_VERSION} ${on} · hunyuan · ${config.target} · ${config.hunyuanModel}${config.hunyuanApiKey ? "" : " · no key"} · ${think}`;
+  }
+  if (config.backend === "custom") {
+    return `bilingual ${PACKAGE_VERSION} ${on} · custom · ${config.target} · ${config.customModel || "no model"} · ${config.customBaseUrl || "no url"}${config.customApiKey ? "" : " · no key"} · ${think}`;
   }
   return `bilingual ${PACKAGE_VERSION} ${on} · google · ${config.sourceLang}→${config.target} · ${think}`;
 }

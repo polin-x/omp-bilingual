@@ -1,13 +1,13 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const REVIEW_TYPE = "com.omp.bilingual.review";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.29";
+export const PACKAGE_VERSION = "0.1.30";
 
 export type ReviewDetails = {
   source: string;
 };
 
-export type Backend = "google" | "deepseek" | "hunyuan";
+export type Backend = "google" | "deepseek" | "hunyuan" | "custom";
 
 export type Pair = {
   en: string;
@@ -37,6 +37,9 @@ export type PluginConfig = {
   hunyuanApiKey: string;
   hunyuanBaseUrl: string;
   hunyuanModel: string;
+  customApiKey: string;
+  customBaseUrl: string;
+  customModel: string;
 };
 
 export const TARGET_LANGUAGES: Array<{ code: string; name: string }> = [
@@ -104,4 +107,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   hunyuanApiKey: "",
   hunyuanBaseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
   hunyuanModel: "hunyuan-turbos-latest",
+  customApiKey: "",
+  customBaseUrl: "",
+  customModel: "",
 };

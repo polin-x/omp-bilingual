@@ -98,6 +98,21 @@ async function editProvider(ctx: ExtensionContext, cfg: PluginConfig): Promise<P
     if (model === undefined) return undefined;
     return { ...cfg, deepseekApiKey: apiKey, deepseekModel: model };
   }
+  if (cfg.backend === "custom") {
+    const apiKey = await promptSecret(ctx, "Custom API key", cfg.customApiKey);
+    if (apiKey === undefined) return undefined;
+    const baseUrl = await pickOrType(ctx, "Custom base URL", cfg.customBaseUrl, [
+      { label: "https://api.openai.com/v1", description: "OpenAI" },
+      { label: "https://openrouter.ai/api/v1", description: "OpenRouter" },
+    ]);
+    if (baseUrl === undefined) return undefined;
+    const model = await pickOrType(ctx, "Custom model", cfg.customModel, [
+      { label: "gpt-4o-mini", description: "OpenAI cheap" },
+      { label: "gpt-4o", description: "OpenAI" },
+    ]);
+    if (model === undefined) return undefined;
+    return { ...cfg, customApiKey: apiKey, customBaseUrl: baseUrl, customModel: model };
+  }
   const apiKey = await promptSecret(ctx, "Hunyuan / TokenHub API key", cfg.hunyuanApiKey);
   if (apiKey === undefined) return undefined;
   const baseUrl = await pickOrType(ctx, "Hunyuan base URL", cfg.hunyuanBaseUrl, [
@@ -141,6 +156,11 @@ function providerHint(cfg: PluginConfig): string {
   if (cfg.backend === "deepseek") {
     return `${cfg.deepseekModel}${cfg.deepseekApiKey ? "" : " · no key"}`;
   }
+  if (cfg.backend === "custom") {
+    const model = cfg.customModel || "no model";
+    const url = cfg.customBaseUrl || "no url";
+    return `${model} · ${url}${cfg.customApiKey ? "" : " · no key"}`;
+  }
   return `${cfg.hunyuanModel}${cfg.hunyuanApiKey ? "" : " · no key"}`;
 }
 
@@ -149,8 +169,9 @@ async function pickBackend(ctx: ExtensionContext, current: Backend): Promise<Bac
     { label: "google", description: current === "google" ? "Current · free, no key" : "Free, no key" },
     { label: "deepseek", description: current === "deepseek" ? "Current · needs API key" : "Needs API key" },
     { label: "hunyuan", description: current === "hunyuan" ? "Current · needs API key" : "Needs API key" },
+    { label: "custom", description: current === "custom" ? "Current · OpenAI-compatible" : "OpenAI-compatible URL + key" },
   ]);
-  if (label === "google" || label === "deepseek" || label === "hunyuan") return label;
+  if (label === "google" || label === "deepseek" || label === "hunyuan" || label === "custom") return label;
   return undefined;
 }
 
