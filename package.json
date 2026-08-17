@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "type": "module",
   "license": "MIT",
   "description": "Paragraph-level Chinese/English cards for English assistant replies",
@@ -42,7 +42,7 @@
       "ornament": {
         "type": "string",
         "default": "globe",
-        "description": "Prefix before translation: globe, shinchan, capybara, bar, or any emoji"
+        "description": "Prefix before translation: globe, shinchan, lulu, bar, or any emoji"
       },
       "thinkingDebounceMs": {
         "type": "number",
