@@ -27,6 +27,24 @@ export function extractSourceParagraphs(message: { role?: string; content?: unkn
   return out;
 }
 
+export function extractAdvisorParagraphs(message: {
+  role?: string;
+  customType?: string;
+  details?: unknown;
+}): string[] {
+  if (message.role !== "custom" || message.customType !== "advisor") return [];
+  const details = message.details;
+  if (!details || typeof details !== "object" || !("notes" in details) || !Array.isArray(details.notes)) return [];
+  const out: string[] = [];
+  for (const entry of details.notes) {
+    if (!entry || typeof entry !== "object" || !("note" in entry)) continue;
+    const note = entry.note;
+    if (typeof note !== "string") continue;
+    for (const text of splitTranslatableParagraphs(note)) out.push(text);
+  }
+  return out;
+}
+
 export type PartitionedParagraphs = {
   closed: string[];
   open: string | undefined;

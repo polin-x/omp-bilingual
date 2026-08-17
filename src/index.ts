@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, TextCardView, ThinkingTranslationView } from "./render.ts";
 import {
   backendChain,
@@ -323,6 +323,19 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("message_end", (event) => {
     if (!liveConfig.enabled) return;
+    const customType = "customType" in event.message ? event.message.customType : undefined;
+    if (event.message.role === "custom" && customType === "advisor") {
+      if (!liveConfig.translateText) return;
+      const texts = extractAdvisorParagraphs(event.message);
+      if (texts.length === 0) return;
+      postTextCard(texts);
+      void translateFresh(texts, () => paintTextCards(texts)).catch((err) => {
+        pi.logger.error("bilingual advisor translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+      return;
+    }
     if (event.message.role === "user") return;
     if (event.message.role !== "assistant") return;
     if (thinkingTimer != null) {
