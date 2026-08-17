@@ -125,9 +125,10 @@ export default function bilingual(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     liveConfig = await loadConfig();
     applyUi(ctx.ui);
-    void safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi).then((frames) => {
-      gifFrames = frames;
-    });
+    gifFrames = await safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi);
+    ctx.setInterval(() => {
+      lastThinkingRender?.();
+    }, gifFrames.length > 1 ? 90 : 220);
   });
 
   pi.on("agent_start", () => {
