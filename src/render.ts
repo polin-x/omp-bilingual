@@ -2,7 +2,7 @@ import { Box, Markdown, Spacer } from "@oh-my-pi/pi-tui";
 import type { Component, MarkdownTheme } from "@oh-my-pi/pi-tui";
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
-import type { BilingualDetails } from "./types.ts";
+import type { BilingualDetails, Pair } from "./types.ts";
 import type { EnglishReview } from "./translate.ts";
 import { CUSTOM_TYPE } from "./types.ts";
 
@@ -37,8 +37,9 @@ const TABLE_BOX = {
 
 export function isBilingualDetails(value: unknown): value is BilingualDetails {
   if (!value || typeof value !== "object") return false;
-  const rec = value as { pairs?: unknown; backend?: unknown };
-  return Array.isArray(rec.pairs) && typeof rec.backend === "string";
+  const rec = value as { pairs?: unknown; texts?: unknown; backend?: unknown };
+  if (typeof rec.backend !== "string") return false;
+  return Array.isArray(rec.pairs) || Array.isArray(rec.texts);
 }
 
 export function renderBilingualCard(
@@ -48,11 +49,34 @@ export function renderBilingualCard(
   if (message.customType !== CUSTOM_TYPE) return undefined;
   const details = isBilingualDetails(message.details) ? message.details : undefined;
   if (!details) return undefined;
-  return renderPairCard(details, theme);
+  return new TextCardView(theme, details.backend, details.pairs ?? []);
+}
+
+export class TextCardView implements Component {
+  #pairs: Pair[] = [];
+
+  constructor(
+    private readonly theme: ThemeLike,
+    private readonly backend: string,
+    pairs: Pair[] = [],
+  ) {
+    this.#pairs = pairs;
+  }
+
+  setPairs(pairs: Pair[]): void {
+    this.#pairs = pairs;
+  }
+
+  invalidate(): void {}
+
+  render(width: number): readonly string[] {
+    if (this.#pairs.length === 0) return [];
+    return renderPairCard({ pairs: this.#pairs, backend: this.backend as BilingualDetails["backend"] }, this.theme)?.render(width) ?? [];
+  }
 }
 
 export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Component | undefined {
-  const pairs = details.pairs;
+  const pairs = details.pairs ?? [];
   if (pairs.length === 0) return undefined;
 
   const mdTheme = markdownTheme(theme);

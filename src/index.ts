@@ -3,7 +3,7 @@ import { loadTranslationCache, saveTranslationCache, translationKey } from "./ca
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
-import { renderBilingualCard, EnglishReviewView, ThinkingTranslationView } from "./render.ts";
+import { EnglishReviewView, TextCardView, ThinkingTranslationView } from "./render.ts";
 import {
   describeBackend,
   looksLikeTranslation,
@@ -31,8 +31,22 @@ export default function bilingual(pi: ExtensionAPI): void {
   const reviews = new Map<string, EnglishReview>();
   const reviewViews: EnglishReviewView[] = [];
   const reviewViewSource = new WeakMap<EnglishReviewView, string>();
+  const textViews: TextCardView[] = [];
+  const textViewSource = new WeakMap<TextCardView, string>();
 
-  pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => renderBilingualCard(message, theme));
+  pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => {
+    if (message.customType !== CUSTOM_TYPE) return undefined;
+    const details = message.details;
+    if (!details || typeof details !== "object" || !("backend" in details) || typeof details.backend !== "string") {
+      return undefined;
+    }
+    const texts = bilingualTexts(details);
+    const view = new TextCardView(theme, details.backend, pairsFromCache(texts));
+    textViews.push(view);
+    textViewSource.set(view, textsKey(texts));
+    if (textViews.length > 16) textViews.shift();
+    return view;
+  });
   pi.registerMessageRenderer(REVIEW_TYPE, (message, _opts, theme) => {
     if (message.customType !== REVIEW_TYPE) return undefined;
     const details = message.details;
@@ -77,6 +91,24 @@ export default function bilingual(pi: ExtensionAPI): void {
   const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
 
   const cachedZh = (en: string) => paraZh.get(keyOf(en));
+
+  const pairsFromCache = (texts: string[]): Pair[] => {
+    const pairs: Pair[] = [];
+    for (const en of texts) {
+      const zh = cachedZh(en);
+      if (zh) pairs.push({ en, zh, kind: "text" });
+    }
+    return pairs;
+  };
+
+  const paintTextCards = (texts: string[]) => {
+    const pairs = pairsFromCache(texts);
+    const key = textsKey(texts);
+    for (const view of textViews) {
+      if (textViewSource.get(view) === key) view.setPairs(pairs);
+    }
+    ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
   const schedulePersist = () => {
     if (!scheduleTimer) return;
     if (persistTimer != null) cancelTimer?.(persistTimer);
@@ -146,27 +178,10 @@ export default function bilingual(pi: ExtensionAPI): void {
       for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
-
-  const flushThinkingTranslate = () => {
-    thinkingTimer = undefined;
-    const job = thinkingQueued;
-    thinkingQueued = undefined;
-    if (!job) return;
-    void translateFresh(job.paras, job.requestRender).catch((err) => {
-      pi.logger.error("bilingual thinking translate failed", {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    });
-  };
-
   const postTextCard = (texts: string[]) => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
-    const pairs: Pair[] = [];
-    for (const en of texts) {
-      const zh = cachedZh(en);
-      if (zh) pairs.push({ en, zh, kind: "text" });
-    }
-    if (pairs.length === 0) return;
+    if (texts.length === 0) return;
+    const pairs = pairsFromCache(texts);
     pi.sendMessage(
       {
         customType: CUSTOM_TYPE,
@@ -174,6 +189,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         display: true,
         attribution: "agent",
         details: {
+          texts,
           pairs,
           backend: liveConfig.backend,
           ornament: liveConfig.ornament,
@@ -318,17 +334,17 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (event.willContinue) return;
     const { thinking, texts } = pendingHarvest;
     pendingHarvest = { thinking: [], texts: [] };
+    if (texts.length > 0) postTextCard(texts);
     const paras = [...thinking, ...texts];
     if (paras.length === 0) return;
-    void translateFresh(paras, lastThinkingRender)
-      .then(() => {
-        postTextCard(texts);
-      })
-      .catch((err) => {
-        pi.logger.error("bilingual translate failed", {
-          err: err instanceof Error ? err.message : String(err),
-        });
+    void translateFresh(paras, () => {
+      paintTextCards(texts);
+      lastThinkingRender?.();
+    }).catch((err) => {
+      pi.logger.error("bilingual translate failed", {
+        err: err instanceof Error ? err.message : String(err),
       });
+    });
   });
 
   pi.registerCommand("bilingual", {
@@ -443,6 +459,24 @@ function isBilingualContextMessage(message: { role?: string; customType?: string
   if (message.role !== "custom") return false;
   const type = message.customType ?? "";
   return type === CUSTOM_TYPE || type === REVIEW_TYPE || type.startsWith("com.omp.bilingual");
+}
+
+function textsKey(texts: string[]): string {
+  return texts.join("\n\0");
+}
+
+function bilingualTexts(details: object): string[] {
+  if ("texts" in details && Array.isArray(details.texts) && details.texts.every((t) => typeof t === "string")) {
+    return details.texts;
+  }
+  if ("pairs" in details && Array.isArray(details.pairs)) {
+    const out: string[] = [];
+    for (const pair of details.pairs) {
+      if (pair && typeof pair === "object" && "en" in pair && typeof pair.en === "string") out.push(pair.en);
+    }
+    return out;
+  }
+  return [];
 }
 
 function isRetryableTranslateError(err: unknown): boolean {
