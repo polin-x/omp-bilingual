@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -38,6 +38,11 @@
         "type": "boolean",
         "default": true,
         "description": "Show the latest English reply translation above the editor"
+      },
+      "reviewEnglish": {
+        "type": "boolean",
+        "default": true,
+        "description": "Check grammar of English user prompts after send"
       },
       "ornament": {
         "type": "string",

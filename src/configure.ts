@@ -15,6 +15,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
+      { label: "review", description: cfg.reviewEnglish ? "check English prompts" : "off" },
       { label: "provider", description: providerHint(cfg) },
       { label: "more", description: `source ${cfg.sourceLang}` },
     ]);
@@ -68,6 +69,14 @@ async function editItem(
     ]);
     if (v === undefined) return undefined;
     return { ...cfg, translateText: v === "on" };
+  }
+  if (item === "review") {
+    const v = await ctx.ui.select("Review English prompts", [
+      { label: "on", description: "Grammar and clearer phrasing after you send" },
+      { label: "off", description: "Do not review prompts" },
+    ]);
+    if (v === undefined) return undefined;
+    return { ...cfg, reviewEnglish: v === "on" };
   }
   if (item === "provider") return editProvider(ctx, cfg);
   if (item === "more") return editMore(ctx, cfg);

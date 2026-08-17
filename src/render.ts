@@ -3,6 +3,7 @@ import type { Component, MarkdownTheme } from "@oh-my-pi/pi-tui";
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
 import type { BilingualDetails } from "./types.ts";
+import type { EnglishReview } from "./translate.ts";
 import { CUSTOM_TYPE } from "./types.ts";
 
 type ThemeLike = {
@@ -138,6 +139,17 @@ export class ThinkingTranslationView implements Component {
     if (!this.#zh) return [];
     return renderThinkingTranslation(this.#zh, this.theme).render(width);
   }
+}
+
+export function renderEnglishReview(review: EnglishReview, theme: ThemeLike): Component {
+  const lines = review.ok
+    ? [`Looks natural.`, review.note].filter(Boolean)
+    : [
+        review.corrected ? `Corrected: ${review.corrected}` : "",
+        review.better && review.better !== review.corrected ? `Clearer: ${review.better}` : "",
+        review.note,
+      ].filter(Boolean);
+  return markedZh(lines.join("\n\n"), theme, markdownTheme(theme));
 }
 
 function markdownTheme(theme: ThemeLike): MarkdownTheme {

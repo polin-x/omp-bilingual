@@ -1,6 +1,12 @@
 import type { Backend, Pair, PluginConfig } from "./types.ts";
 import { languageName } from "./types.ts";
 
+export type EnglishReview = {
+  ok: boolean;
+  corrected: string;
+  better: string;
+  note: string;
+};
 const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 
 export async function translateParagraphs(
@@ -231,6 +237,82 @@ function restoreMarkup(text: string, tokens: string[]): string {
 
 function unreachable(x: never): never {
   throw new Error(`unknown backend: ${String(x)}`);
+}
+
+export async function reviewEnglishPrompt(
+  text: string,
+  config: PluginConfig,
+  signal?: AbortSignal,
+): Promise<EnglishReview | undefined> {
+  if (config.backend === "google") return undefined;
+  const opts =
+    config.backend === "deepseek"
+      ? {
+          apiKey: config.deepseekApiKey,
+          baseUrl: "https://api.deepseek.com",
+          model: config.deepseekModel,
+          name: "DeepSeek",
+          disableThinking: true,
+        }
+      : {
+          apiKey: config.hunyuanApiKey,
+          baseUrl: config.hunyuanBaseUrl,
+          model: config.hunyuanModel,
+          name: "Hunyuan",
+          disableThinking: false,
+        };
+  if (!opts.apiKey) throw new Error(`${opts.name} API key missing`);
+  const res = await fetch(joinUrl(opts.baseUrl, "chat/completions"), {
+    method: "POST",
+    signal,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${opts.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      temperature: 0,
+      ...(opts.disableThinking ? { thinking: { type: "disabled" } } : {}),
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You check English for a coding-agent prompt.",
+            "Do not answer the user's technical question.",
+            "Return ONLY JSON: {\"ok\":boolean,\"corrected\":\"...\",\"better\":\"...\",\"note\":\"...\"}.",
+            "ok=true if grammar is already natural.",
+            "corrected: grammatical version of the same request, same meaning.",
+            "better: a clearer prompt if useful, else empty string.",
+            "note: one short Chinese sentence about the English, not about the task.",
+          ].join(" "),
+        },
+        { role: "user", content: text },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${opts.name} HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  }
+  const payload = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return parseEnglishReview(payload.choices?.[0]?.message?.content ?? "", text);
+}
+
+function parseEnglishReview(raw: string, source: string): EnglishReview | undefined {
+  const stripped = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  const slice = start >= 0 && end > start ? stripped.slice(start, end + 1) : stripped;
+  const parsed = tryJson(slice);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  if (!("ok" in parsed) || !("corrected" in parsed) || !("note" in parsed)) return undefined;
+  const ok = parsed.ok === true;
+  const corrected = typeof parsed.corrected === "string" ? parsed.corrected.trim() : "";
+  const better = "better" in parsed && typeof parsed.better === "string" ? parsed.better.trim() : "";
+  const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
+  if (note.length > 240 || corrected.length > Math.max(80, source.length * 3)) return undefined;
+  if (!ok && !corrected) return undefined;
+  return { ok, corrected, better, note };
 }
 
 export function describeBackend(backend: Backend): string {

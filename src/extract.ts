@@ -88,6 +88,15 @@ export function isTranslatable(text: string): boolean {
   return true;
 }
 
+export function isEnglishPrompt(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 16 || t.startsWith("/")) return false;
+  if (!LATIN.test(t)) return false;
+  const letters = t.match(/[A-Za-z]/g)?.length ?? 0;
+  const cjk = t.match(/[\u3400-\u9fff]/g)?.length ?? 0;
+  return letters >= 12 && letters > cjk * 2;
+}
+
 function isStructuralMarkdownLine(raw: string): boolean {
   const line = raw.trim();
   if (line.length === 0) return false;

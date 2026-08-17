@@ -37,6 +37,8 @@ export async function loadConfig(): Promise<PluginConfig> {
         : DEFAULT_CONFIG.translateThinking,
     translateText:
       typeof merged.translateText === "boolean" ? merged.translateText : DEFAULT_CONFIG.translateText,
+    reviewEnglish:
+      typeof merged.reviewEnglish === "boolean" ? merged.reviewEnglish : DEFAULT_CONFIG.reviewEnglish,
     ornament: asString(merged.ornament, DEFAULT_CONFIG.ornament),
     ornamentGif: asString(merged.ornamentGif, DEFAULT_CONFIG.ornamentGif),
     thinkingDebounceMs: asDebounceMs(merged.thinkingDebounceMs),

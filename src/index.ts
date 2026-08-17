@@ -2,9 +2,15 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
-import { renderBilingualCard, renderPairCard, ThinkingTranslationView } from "./render.ts";
-import { describeBackend, looksLikeTranslation, translateParagraphs } from "./translate.ts";
+import { extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
+import { renderBilingualCard, renderEnglishReview, renderPairCard, ThinkingTranslationView } from "./render.ts";
+import {
+  describeBackend,
+  looksLikeTranslation,
+  reviewEnglishPrompt,
+  translateParagraphs,
+  type EnglishReview,
+} from "./translate.ts";
 import {
   CUSTOM_TYPE,
   DEFAULT_CONFIG,
@@ -146,10 +152,41 @@ export default function bilingual(pi: ExtensionAPI): void {
     );
   };
 
+  const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
+
+  const runEnglishReview = async (text: string) => {
+    if (!ui || liveConfig.backend === "google") return;
+    const cacheKey = reviewKeyOf(text);
+    const cached = paraZh.get(cacheKey);
+    if (cached) {
+      const review = parseCachedReview(cached);
+      if (review) {
+        ui.setWidget("bilingual-review", (_tui, theme) => renderEnglishReview(review, theme), {
+          placement: "aboveEditor",
+        });
+        return;
+      }
+    }
+    try {
+      const review = await reviewEnglishPrompt(text, liveConfig);
+      if (!review || !ui) return;
+      paraZh.set(cacheKey, JSON.stringify(review));
+      schedulePersist();
+      ui.setWidget("bilingual-review", (_tui, theme) => renderEnglishReview(review, theme), {
+        placement: "aboveEditor",
+      });
+    } catch (err) {
+      pi.logger.error("bilingual english review failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   const applyUi = (next: ExtensionUIContext) => {
     ui = next;
     next.setStatus("bilingual", barStatus(liveConfig));
     if (!liveConfig.enabled || !liveConfig.translateText) next.setWidget("bilingual", undefined);
+    if (!liveConfig.enabled || !liveConfig.reviewEnglish) next.setWidget("bilingual-review", undefined);
   };
 
   pi.registerAssistantThinkingRenderer((context, theme) => {
@@ -191,7 +228,15 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("message_end", (event) => {
-    if (event.message.role !== "assistant" || !liveConfig.enabled) return;
+    if (!liveConfig.enabled) return;
+    if (event.message.role === "user") {
+      if (!liveConfig.reviewEnglish) return;
+      const text = userPromptText(event.message);
+      if (!isEnglishPrompt(text)) return;
+      void runEnglishReview(text);
+      return;
+    }
+    if (event.message.role !== "assistant") return;
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
       thinkingTimer = undefined;
@@ -340,4 +385,33 @@ function messageHasToolCalls(message: { content?: unknown }): boolean {
     if (!block || typeof block !== "object" || !("type" in block)) return false;
     return block.type === "toolCall" || block.type === "tool_call";
   });
+}
+
+function userPromptText(message: { content?: unknown }): string {
+  const content = message.content;
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    if (!("type" in block) || !("text" in block)) continue;
+    if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
+  }
+  return parts.join("\n").trim();
+}
+
+function parseCachedReview(raw: string): EnglishReview | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    if (!("ok" in parsed) || !("corrected" in parsed) || !("note" in parsed)) return undefined;
+    return {
+      ok: parsed.ok === true,
+      corrected: typeof parsed.corrected === "string" ? parsed.corrected : "",
+      better: "better" in parsed && typeof parsed.better === "string" ? parsed.better : "",
+      note: typeof parsed.note === "string" ? parsed.note : "",
+    };
+  } catch {
+    return undefined;
+  }
 }

@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.23";
+export const PACKAGE_VERSION = "0.1.24";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 
@@ -23,6 +23,7 @@ export type PluginConfig = {
   sourceLang: string;
   translateThinking: boolean;
   translateText: boolean;
+  reviewEnglish: boolean;
   ornament: string;
   ornamentGif: string;
   thinkingDebounceMs: number;
@@ -89,6 +90,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   sourceLang: "auto",
   translateThinking: true,
   translateText: true,
+  reviewEnglish: true,
   ornament: "globe",
   ornamentGif: "",
   thinkingDebounceMs: 2000,
