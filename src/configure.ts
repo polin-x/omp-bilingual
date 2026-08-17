@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
-import { prepareOrnamentGif } from "./ornament-store.ts";
+import { looksLikeImagePath, prepareOrnamentGif } from "./ornament-store.ts";
 import type { Backend, PluginConfig } from "./types.ts";
 import { ORNAMENT_PRESETS, TARGET_LANGUAGES, languageName, resolveOrnament } from "./types.ts";
 
@@ -18,7 +18,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
       { label: "ornament", description: resolveOrnament(cfg.ornament).frames[0] ?? cfg.ornament },
       { label: "provider", description: providerHint(cfg) },
-      { label: "more", description: `source ${cfg.sourceLang} · debounce ${cfg.thinkingDebounceMs}ms` },
+      { label: "more", description: `source ${cfg.sourceLang}` },
     ]);
     if (item === undefined) return undefined;
     if (item === "done") return patchConfig(cfg);
@@ -82,15 +82,17 @@ async function editItem(
       })),
     );
     if (picked === undefined) return undefined;
-    if (picked === "gif" || picked === "lulu" || picked === "file") {
-      const raw = await ctx.ui.input("Image or GIF path", cfg.ornamentGif);
+    if (picked === "gif" || picked === "lulu" || picked === "file" || looksLikeImagePath(picked)) {
+      const raw = looksLikeImagePath(picked)
+        ? picked
+        : await ctx.ui.input("Image or GIF path", cfg.ornamentGif);
       if (raw === undefined) return undefined;
       const source = raw.trim();
-      if (!source) return { ...cfg, ornament: picked, ornamentGif: "" };
+      if (!source) return { ...cfg, ornament: "file", ornamentGif: "" };
       try {
         const stored = await prepareOrnamentGif(source);
         ctx.ui.notify(`Ornament saved · ${stored}`, "info");
-        return { ...cfg, ornament: picked, ornamentGif: source };
+        return { ...cfg, ornament: "file", ornamentGif: source };
       } catch (err) {
         ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
         return undefined;
@@ -137,30 +139,17 @@ async function editMore(ctx: ExtensionContext, cfg: PluginConfig): Promise<Plugi
   const item = await ctx.ui.select("More", [
     { label: "back", description: "Return" },
     { label: "source", description: cfg.sourceLang },
-    { label: "debounce", description: `${cfg.thinkingDebounceMs}ms` },
   ]);
   if (item === undefined || item === "back") return undefined;
-  if (item === "source") {
-    const sourceLang = await pickOrType(ctx, "Source language", cfg.sourceLang, [
-      { label: "auto", description: "Detect" },
-      { label: "en", description: "English" },
-      { label: "zh-CN", description: "Simplified Chinese" },
-      { label: "ja", description: "Japanese" },
-      { label: "ko", description: "Korean" },
-    ]);
-    if (sourceLang === undefined) return undefined;
-    return { ...cfg, sourceLang };
-  }
-  const raw = await pickOrType(ctx, "Thinking debounce (ms)", String(cfg.thinkingDebounceMs), [
-    { label: "1000", description: "Faster" },
-    { label: "2000", description: "Default" },
-    { label: "3000", description: "Fewer requests" },
-    { label: "5000", description: "Wait longer" },
+  const sourceLang = await pickOrType(ctx, "Source language", cfg.sourceLang, [
+    { label: "auto", description: "Detect" },
+    { label: "en", description: "English" },
+    { label: "zh-CN", description: "Simplified Chinese" },
+    { label: "ja", description: "Japanese" },
+    { label: "ko", description: "Korean" },
   ]);
-  if (raw === undefined) return undefined;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n)) return undefined;
-  return { ...cfg, thinkingDebounceMs: n };
+  if (sourceLang === undefined) return undefined;
+  return { ...cfg, sourceLang };
 }
 
 function summarize(cfg: PluginConfig): string {

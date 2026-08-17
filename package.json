@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "type": "module",
   "license": "MIT",
   "description": "Paragraph-level Chinese/English cards for English assistant replies",
@@ -48,11 +48,6 @@
         "type": "string",
         "default": "",
         "description": "Path to a GIF or still image. Stills are converted to GIF under ~/.omp/agent/bilingual-ornaments"
-      },
-      "thinkingDebounceMs": {
-        "type": "number",
-        "default": 2000,
-        "description": "Wait this many ms after thinking settles before translating"
       },
       "deepseekApiKey": {
         "type": "string",

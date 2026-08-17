@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.15";
+export const PACKAGE_VERSION = "0.1.16";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 
@@ -15,6 +15,36 @@ export type BilingualDetails = {
   backend: Backend;
   ornament?: string;
 };
+
+/** True when a session/LLM message is this plugin's display card. */
+export function isBilingualMessage(message: { role?: string; customType?: string }): boolean {
+  return message.role === "custom" && message.customType === CUSTOM_TYPE;
+}
+
+/**
+ * Transcript card for the TUI only.
+ * `content` stays empty: convertToLlm and compaction side-requests turn custom
+ * content into a developer message. Translation lives in `details` (not sent).
+ */
+export function bilingualDisplayCard(
+  pairs: Pair[],
+  backend: Backend,
+  ornament: string,
+): {
+  customType: typeof CUSTOM_TYPE;
+  content: "";
+  display: true;
+  attribution: "agent";
+  details: BilingualDetails;
+} {
+  return {
+    customType: CUSTOM_TYPE,
+    content: "",
+    display: true,
+    attribution: "agent",
+    details: { pairs, backend, ornament },
+  };
+}
 
 export type PluginConfig = {
   enabled: boolean;

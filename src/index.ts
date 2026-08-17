@@ -3,10 +3,19 @@ import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { loadGifFrames, type GifFrame } from "./gif.ts";
-import { prepareOrnamentGif } from "./ornament-store.ts";
+import { ornamentMediaPath, prepareOrnamentGif } from "./ornament-store.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
-import { CUSTOM_TYPE, DEFAULT_CONFIG, PACKAGE_VERSION, type Backend, type Pair, type PluginConfig } from "./types.ts";
+import {
+  bilingualDisplayCard,
+  CUSTOM_TYPE,
+  DEFAULT_CONFIG,
+  isBilingualMessage,
+  PACKAGE_VERSION,
+  type Backend,
+  type Pair,
+  type PluginConfig,
+} from "./types.ts";
 
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
@@ -18,13 +27,11 @@ export default function bilingual(pi: ExtensionAPI): void {
   const paraBusy = new Set<string>();
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
-  let cancelTimer: ((id: unknown) => void) | undefined;
-  let thinkingTimer: unknown;
-  let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
   let sessionIsIdle: (() => boolean) | undefined;
   let pendingTextCard: { pairs: Pair[]; backend: Backend } | undefined;
   let gifFrames: GifFrame[] = [];
+  let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
 
   const rememberZh = (en: string, zh: string) => {
     paraZh.set(en, zh);
@@ -47,9 +54,8 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (fresh.length === 0) return [];
     for (const p of fresh) paraBusy.add(p);
     try {
-      const config = await loadConfig();
-      if (!config.enabled) return [];
-      const pairs = await translateParagraphs(fresh, config);
+      if (!liveConfig.enabled) return [];
+      const pairs = await translateParagraphs(fresh, liveConfig);
       const out: Pair[] = [];
       for (const pair of pairs) {
         if (pair.zh && pair.zh !== pair.en) {
@@ -67,32 +73,15 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
-  const flushThinkingTranslate = () => {
-    thinkingTimer = undefined;
-    const job = thinkingQueued;
-    thinkingQueued = undefined;
-    if (!job) return;
-    void translateFresh(job.paras, job.requestRender).catch((err) => {
-      pi.logger.error("bilingual thinking translate failed", {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    });
-  };
-
   const postTextCard = () => {
     const card = pendingTextCard;
     pendingTextCard = undefined;
     if (!card || card.pairs.length === 0) return;
-    pi.sendMessage(
-      {
-        customType: CUSTOM_TYPE,
-        content: card.pairs.map((p) => p.zh).join("\n\n"),
-        display: true,
-        attribution: "agent",
-        details: { pairs: card.pairs, backend: card.backend, ornament: liveConfig.ornament },
-      },
-      { triggerTurn: false },
-    );
+    if (sessionIsIdle && !sessionIsIdle()) {
+      pendingTextCard = card;
+      return;
+    }
+    pi.sendMessage(bilingualDisplayCard(card.pairs, card.backend, liveConfig.ornament), { triggerTurn: false });
   };
 
   const scheduleTextCard = () => {
@@ -108,65 +97,8 @@ export default function bilingual(pi: ExtensionAPI): void {
     tick();
   };
 
-  pi.registerAssistantThinkingRenderer((context, theme) => {
-    if (!liveConfig.enabled || !liveConfig.translateThinking) return undefined;
-    const { closed, open } = partitionTranslatableParagraphs(context.text);
-    const paras = open ? [...closed, open] : closed;
-    if (paras.length === 0) return undefined;
-    lastThinkingRender = () => context.requestRender();
-    const view = new ThinkingTranslationView(theme);
-    view.setOrnament(liveConfig.ornament);
-    view.setGifFrames(gifFrames);
-    const zh = paras.map((p) => paraZh.get(p)).filter((t): t is string => Boolean(t)).join("\n\n");
-    if (zh) view.setZh(zh);
-    if (!paras.some((p) => !paraZh.has(p) && !paraFailed.has(p) && !paraBusy.has(p))) return view;
-    if (!scheduleTimer) return view;
-    thinkingQueued = { paras, requestRender: lastThinkingRender };
-    if (thinkingTimer != null) {
-      cancelTimer?.(thinkingTimer);
-      thinkingTimer = undefined;
-    }
-    thinkingTimer = scheduleTimer(flushThinkingTranslate, liveConfig.thinkingDebounceMs);
-    return view;
-  });
-
-  pi.on("context", (event) => ({
-    messages: event.messages.filter((m) => !(m.role === "custom" && m.customType === CUSTOM_TYPE)),
-  }));
-
-  pi.on("session_start", async (_event, ctx) => {
-    scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
-    cancelTimer = (id) => ctx.clearTimer(id);
-    liveConfig = await loadConfig();
-    sessionIsIdle = () => ctx.isIdle();
-    gifFrames = await safeLoadGif(liveConfig.ornamentGif, pi);
-    ctx.setInterval(() => {
-      lastThinkingRender?.();
-    }, gifFrames.length > 0 ? 80 : 220);
-    ctx.ui.setStatus("bilingual", barStatus(liveConfig));
-  });
-
-  pi.on("message_end", async (event) => {
-    if (event.message.role !== "assistant") return;
-    if (thinkingTimer != null) {
-      cancelTimer?.(thinkingTimer);
-      thinkingTimer = undefined;
-    }
-    flushThinkingTranslate();
-    lastThinkingRender?.();
+  const queueTextCard = (texts: string[]) => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
-    if (messageHasToolCalls(event.message)) return;
-    const texts = extractSourceParagraphs(event.message)
-      .filter((s) => s.kind === "text")
-      .map((s) => s.text);
-    if (texts.length === 0) return;
-    try {
-      await translateFresh(texts);
-    } catch (err) {
-      pi.logger.error("bilingual text translate failed", {
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
     const pairs: Pair[] = [];
     for (const en of texts) {
       const zh = paraZh.get(en);
@@ -175,10 +107,73 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (pairs.length === 0) return;
     pendingTextCard = { pairs, backend: liveConfig.backend };
     scheduleTextCard();
+  };
+
+  pi.registerAssistantThinkingRenderer((context, theme) => {
+    if (!liveConfig.enabled || !liveConfig.translateThinking) return undefined;
+    const { closed, open } = partitionTranslatableParagraphs(context.text);
+    const paras = open ? [...closed, open] : closed;
+    if (paras.length === 0) return undefined;
+    lastThinkingRender = () => context.requestRender();
+    const zh = paras
+      .map((p) => paraZh.get(p))
+      .filter((t): t is string => Boolean(t))
+      .join("\n\n");
+    if (!zh) return undefined;
+    const view = new ThinkingTranslationView(theme);
+    view.setOrnament(liveConfig.ornament);
+    view.setGifFrames(gifFrames);
+    view.setZh(zh);
+    return view;
   });
 
-  pi.on("agent_end", () => {
-    scheduleTextCard();
+  pi.on("context", (event) => ({
+    messages: event.messages.filter((m) => !isBilingualMessage(m)),
+  }));
+
+  pi.on("session_start", async (_event, ctx) => {
+    scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
+    liveConfig = await loadConfig();
+    sessionIsIdle = () => ctx.isIdle();
+    gifFrames = await safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi);
+    ctx.setInterval(() => {
+      lastThinkingRender?.();
+    }, gifFrames.length > 1 ? 90 : 220);
+    ctx.ui.setStatus("bilingual", barStatus(liveConfig));
+  });
+
+  pi.on("message_end", (event) => {
+    if (event.message.role !== "assistant" || !liveConfig.enabled) return;
+    const sources = extractSourceParagraphs(event.message);
+    if (liveConfig.translateThinking) {
+      for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
+    }
+    if (liveConfig.translateText && !messageHasToolCalls(event.message)) {
+      for (const s of sources) if (s.kind === "text") pendingHarvest.texts.push(s.text);
+    }
+  });
+
+  pi.on("agent_end", (event) => {
+    if (event.willContinue) {
+      scheduleTextCard();
+      return;
+    }
+    const { thinking, texts } = pendingHarvest;
+    pendingHarvest = { thinking: [], texts: [] };
+    const paras = [...thinking, ...texts];
+    if (paras.length === 0) {
+      scheduleTextCard();
+      return;
+    }
+    void translateFresh(paras, lastThinkingRender)
+      .then(() => {
+        queueTextCard(texts);
+      })
+      .catch((err) => {
+        pi.logger.error("bilingual translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
   });
 
   pi.registerCommand("bilingual", {
@@ -203,7 +198,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         const next = await runConfigure(ctx);
         if (!next) return;
         liveConfig = next;
-        gifFrames = await safeLoadGif(next.ornamentGif, pi);
+        gifFrames = await safeLoadGif(ornamentMediaPath(next.ornament, next.ornamentGif), pi);
         ctx.ui.setStatus("bilingual", barStatus(next));
         ctx.ui.notify(statusLine(next), "info");
         return;
@@ -219,8 +214,6 @@ export default function bilingual(pi: ExtensionAPI): void {
     },
   });
 }
-
-
 
 const SUBCOMMANDS = [
   { name: "settings", description: "Open TUI settings: language, backend, key, thinking" },
@@ -310,4 +303,3 @@ async function safeLoadGif(path: string, pi: ExtensionAPI): Promise<GifFrame[]> 
     return [];
   }
 }
-
