@@ -80,6 +80,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   })();
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
+  let sessionIsIdle: (() => boolean) | undefined;
   let thinkingTimer: unknown;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
@@ -178,24 +179,27 @@ export default function bilingual(pi: ExtensionAPI): void {
       for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
-  const postTextCard = (texts: string[]) => {
+  const postTextCard = async (texts: string[]): Promise<void> => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
     if (texts.length === 0) return;
+    if (sessionIsIdle && !sessionIsIdle()) return;
     const pairs = pairsFromCache(texts);
-    pi.sendMessage(
-      {
-        customType: CUSTOM_TYPE,
-        content: "",
-        display: true,
-        attribution: "agent",
-        details: {
-          texts,
-          pairs,
-          backend: liveConfig.backend,
-          ornament: liveConfig.ornament,
+    await Promise.resolve(
+      pi.sendMessage(
+        {
+          customType: CUSTOM_TYPE,
+          content: "",
+          display: true,
+          attribution: "agent",
+          details: {
+            texts,
+            pairs,
+            backend: liveConfig.backend,
+            ornament: liveConfig.ornament,
+          },
         },
-      },
-      { triggerTurn: false },
+        { triggerTurn: false, deliverAs: "nextTurn" },
+      ) as void | Promise<void>,
     );
   };
 
@@ -288,6 +292,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     await boot;
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
+    sessionIsIdle = () => ctx.isIdle();
     applyUi(ctx.ui);
   });
 
@@ -330,11 +335,11 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("agent_end", (event) => {
+  pi.on("agent_end", async (event) => {
     if (event.willContinue) return;
     const { thinking, texts } = pendingHarvest;
     pendingHarvest = { thinking: [], texts: [] };
-    if (texts.length > 0) postTextCard(texts);
+    if (texts.length > 0) await postTextCard(texts);
     const paras = [...thinking, ...texts];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
