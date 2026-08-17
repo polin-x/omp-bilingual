@@ -64,7 +64,6 @@ export default function bilingual(pi: ExtensionAPI): void {
     const cached = parseCachedReview(paraZh.get(reviewKeyOf(details.source)) ?? "");
     const hit = reviews.get(details.source) ?? fromDetails ?? cached;
     if (hit) view.setReview(hit);
-    else void runEnglishReview(details.source);
     reviewViews.push(view);
     reviewViewSource.set(view, details.source);
     if (reviewViews.length > 16) reviewViews.shift();
@@ -365,7 +364,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (liveConfig.translateThinking) {
       for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
     }
-    if (liveConfig.translateText && !messageHasToolCalls(event.message)) {
+    if (liveConfig.translateText) {
       for (const s of sources) if (s.kind === "text") pendingHarvest.texts.push(s.text);
     }
     if (pendingHarvest.thinking.length > 0) {
@@ -522,14 +521,6 @@ function bilingualTexts(details: object): string[] {
 function isRetryableTranslateError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /HTTP (429|5\d\d)|timeout|fetch|socket|ECONN|network|aborted/i.test(msg);
-}
-
-function messageHasToolCalls(message: { content?: unknown }): boolean {
-  if (!Array.isArray(message.content)) return false;
-  return message.content.some((block) => {
-    if (!block || typeof block !== "object" || !("type" in block)) return false;
-    return block.type === "toolCall" || block.type === "tool_call";
-  });
 }
 
 
