@@ -1,7 +1,7 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const REVIEW_TYPE = "com.omp.bilingual.review";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.40";
+export const PACKAGE_VERSION = "0.1.41";
 
 export type ReviewDetails = {
   source: string;
@@ -13,7 +13,7 @@ export type FallbackSlot = Backend | "off";
 export type Pair = {
   en: string;
   zh: string;
-  kind?: "text" | "thinking";
+  kind?: "text" | "thinking" | "advisor";
 };
 
 export type BilingualDetails = {
@@ -21,6 +21,7 @@ export type BilingualDetails = {
   texts?: string[];
   backend: Backend;
   ornament?: string;
+  kind?: Pair["kind"];
 };
 
 export type PluginConfig = {
@@ -44,6 +45,7 @@ export type PluginConfig = {
   customApiKey: string;
   customBaseUrl: string;
   customModel: string;
+  customAlias: string;
 };
 
 export const TARGET_LANGUAGES: Array<{ code: string; name: string }> = [
@@ -116,4 +118,5 @@ export const DEFAULT_CONFIG: PluginConfig = {
   customApiKey: "",
   customBaseUrl: "",
   customModel: "",
+  customAlias: "",
 };

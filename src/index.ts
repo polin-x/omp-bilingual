@@ -42,7 +42,8 @@ export default function bilingual(pi: ExtensionAPI): void {
       return undefined;
     }
     const texts = bilingualTexts(details);
-    const view = new TextCardView(theme, details.backend, pairsFromCache(texts));
+    const kind = "kind" in details && details.kind === "advisor" ? "advisor" : "text";
+    const view = new TextCardView(theme, details.backend, pairsFromCache(texts, kind));
     textViews.push(view);
     textViewSource.set(view, textsKey(texts));
     if (textViews.length > 16) textViews.shift();
@@ -88,29 +89,30 @@ export default function bilingual(pi: ExtensionAPI): void {
   let liveThinks: Array<{ view: ThinkingTranslationView; paras: string[] }> = [];
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
-  let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
+  let pendingHarvest = { thinking: [] as string[], texts: [] as string[], advisors: [] as string[] };
 
   const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
 
   const cachedZh = (en: string) => paraZh.get(keyOf(en));
 
-  const pairsFromCache = (texts: string[]): Pair[] => {
+  const pairsFromCache = (texts: string[], kind: Pair["kind"] = "text"): Pair[] => {
     const pairs: Pair[] = [];
     for (const en of texts) {
       const zh = cachedZh(en);
-      if (zh) pairs.push({ en, zh, kind: "text" });
+      if (zh) pairs.push({ en, zh, kind });
     }
     return pairs;
   };
 
-  const paintTextCards = (texts: string[]) => {
-    const pairs = pairsFromCache(texts);
+  const paintTextCards = (texts: string[], kind: Pair["kind"] = "text") => {
+    const pairs = pairsFromCache(texts, kind);
     const key = textsKey(texts);
     for (const view of textViews) {
       if (textViewSource.get(view) === key) view.setPairs(pairs);
     }
     ui?.setStatus("bilingual", barStatus(liveConfig));
   };
+
   const schedulePersist = () => {
     if (!scheduleTimer) return;
     if (persistTimer != null) cancelTimer?.(persistTimer);
@@ -180,11 +182,11 @@ export default function bilingual(pi: ExtensionAPI): void {
       for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
-  const postTextCard = (texts: string[]) => {
+  const postTextCard = (texts: string[], kind: Pair["kind"] = "text") => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
     if (texts.length === 0) return;
     if (sessionIsIdle && !sessionIsIdle()) return;
-    const pairs = pairsFromCache(texts);
+    const pairs = pairsFromCache(texts, kind);
     pi.sendMessage(
       {
         customType: CUSTOM_TYPE,
@@ -194,6 +196,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         details: {
           texts,
           pairs,
+          kind,
           backend: liveConfig.backend,
           ornament: liveConfig.ornament,
         },
@@ -317,7 +320,8 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_start", () => {
-    pendingHarvest = { thinking: [], texts: [] };
+    pendingHarvest.thinking = [];
+    pendingHarvest.texts = [];
     ui?.setWidget("bilingual", undefined);
   });
 
@@ -328,8 +332,10 @@ export default function bilingual(pi: ExtensionAPI): void {
       if (!liveConfig.translateText) return;
       const texts = extractAdvisorParagraphs(event.message);
       if (texts.length === 0) return;
-      postTextCard(texts);
-      void translateFresh(texts, () => paintTextCards(texts)).catch((err) => {
+      const idle = !sessionIsIdle || sessionIsIdle();
+      if (idle) postTextCard(texts, "advisor");
+      else pendingHarvest.advisors.push(...texts);
+      void translateFresh(texts, () => paintTextCards(texts, "advisor")).catch((err) => {
         pi.logger.error("bilingual advisor translate failed", {
           err: err instanceof Error ? err.message : String(err),
         });
@@ -361,12 +367,14 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   pi.on("agent_end", (event) => {
     if (event.willContinue) return;
-    const { thinking, texts } = pendingHarvest;
-    pendingHarvest = { thinking: [], texts: [] };
+    const { thinking, texts, advisors } = pendingHarvest;
+    pendingHarvest = { thinking: [], texts: [], advisors: [] };
+    if (advisors.length > 0) postTextCard(advisors, "advisor");
     if (texts.length > 0) postTextCard(texts);
-    const paras = [...thinking, ...texts];
+    const paras = [...thinking, ...texts, ...advisors];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
+      if (advisors.length > 0) paintTextCards(advisors, "advisor");
       paintTextCards(texts);
       lastThinkingRender?.();
     }).catch((err) => {

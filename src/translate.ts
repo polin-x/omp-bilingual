@@ -117,7 +117,7 @@ function openAiOpts(config: PluginConfig, backend: Backend): OpenAiOpts {
         apiKey: config.customApiKey,
         baseUrl: config.customBaseUrl,
         model: config.customModel,
-        name: "Custom",
+        name: config.customAlias.trim() || "Custom",
         target: config.target,
       };
     default:
@@ -329,9 +329,9 @@ async function reviewOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal):
             "You are an English tutor for a Chinese software engineer. Do not answer the technical question.",
             "Return ONLY JSON: {\"ok\":boolean,\"corrected\":\"...\",\"better\":\"...\",\"note\":\"...\"}.",
             "ok=true if everyday English is already natural.",
-            "corrected: same request with grammar and spelling fixed. If already fine, copy the source.",
+            "corrected: grammar/spelling only. Keep the same subject, question vs statement, and meaning. Do not swap 'you' for another subject. Example: \"Have you support the pulgin to translate the advisor note?\" → \"Does the plugin support translating advisor notes?\".",
             "better: ALWAYS a compact LLM prompt for the same intent. Imperative. No greeting, no filler. Goal, constraints, output. Max 2 short sentences.",
-            "note: Chinese, 2-3 short sentences. 1) Name the exact grammar/spelling mistakes (quote the wrong words). 2) One memory tip (collocation, tense, article). Do not discuss the coding task.",
+            "note: Chinese, 2-3 short sentences. 1) Name the exact grammar/spelling mistakes (quote the wrong words). 2) One memory tip that matches corrected (same verb pattern). Do not discuss the coding task.",
           ].join(" "),
         },
         { role: "user", content: text },
@@ -364,7 +364,7 @@ function parseEnglishReview(raw: string, source: string): EnglishReview | undefi
   return { ok, corrected, better, note };
 }
 
-export function describeBackend(backend: Backend): string {
+export function describeBackend(backend: Backend, config?: PluginConfig): string {
   switch (backend) {
     case "google":
       return "google (free)";
@@ -373,12 +373,14 @@ export function describeBackend(backend: Backend): string {
     case "hunyuan":
       return "hunyuan";
     case "custom":
-      return "custom";
+      return config?.customAlias.trim() || "custom";
   }
 }
 
 export function describeChain(config: PluginConfig): string {
-  return backendChain(config).map(describeBackend).join(">");
+  return backendChain(config)
+    .map((backend) => describeBackend(backend, config))
+    .join(">");
 }
 
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {

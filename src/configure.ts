@@ -11,9 +11,9 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
     const item = await ctx.ui.select("Bilingual settings", [
       { label: "done", description: summarize(cfg) },
       { label: "enabled", description: cfg.enabled ? "on" : "off" },
-      { label: "backend", description: cfg.backend },
-      { label: "fallback1", description: cfg.fallback1 },
-      { label: "fallback2", description: cfg.fallback2 },
+      { label: "backend", description: backendLabel(cfg) },
+      { label: "fallback1", description: fallbackLabel(cfg, cfg.fallback1) },
+      { label: "fallback2", description: fallbackLabel(cfg, cfg.fallback2) },
       { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
@@ -111,6 +111,9 @@ async function editProvider(ctx: ExtensionContext, cfg: PluginConfig): Promise<P
     return { ...cfg, deepseekApiKey: apiKey, deepseekModel: model };
   }
   if (cfg.backend === "custom") {
+    const aliasRaw = await ctx.ui.input("Custom alias", cfg.customAlias || "e.g. b.ai");
+    if (aliasRaw === undefined) return undefined;
+    const customAlias = aliasRaw.trim() || cfg.customAlias;
     const apiKey = await promptSecret(ctx, "Custom API key", cfg.customApiKey);
     if (apiKey === undefined) return undefined;
     const baseUrl = await pickOrType(ctx, "Custom base URL", cfg.customBaseUrl, [
@@ -123,7 +126,7 @@ async function editProvider(ctx: ExtensionContext, cfg: PluginConfig): Promise<P
       { label: "gpt-4o", description: "OpenAI" },
     ]);
     if (model === undefined) return undefined;
-    return { ...cfg, customApiKey: apiKey, customBaseUrl: baseUrl, customModel: model };
+    return { ...cfg, customAlias, customApiKey: apiKey, customBaseUrl: baseUrl, customModel: model };
   }
   const apiKey = await promptSecret(ctx, "Hunyuan / TokenHub API key", cfg.hunyuanApiKey);
   if (apiKey === undefined) return undefined;
@@ -160,21 +163,43 @@ async function editMore(ctx: ExtensionContext, cfg: PluginConfig): Promise<Plugi
 function summarize(cfg: PluginConfig): string {
   const on = cfg.enabled ? "on" : "off";
   const think = cfg.translateThinking ? "thinking" : "no-thinking";
-  const chain = [cfg.backend, cfg.fallback1, cfg.fallback2].filter((s) => s !== "off").join(">");
+  const chain = [backendLabel(cfg), fallbackLabel(cfg, cfg.fallback1), fallbackLabel(cfg, cfg.fallback2)]
+    .filter((s) => s !== "off")
+    .join(">");
   return `${on} · ${chain} · ${cfg.target} · ${think}`;
+}
+
+function backendLabel(cfg: PluginConfig): string {
+  if (cfg.backend === "custom") return cfg.customAlias.trim() || "custom";
+  return cfg.backend;
+}
+
+function fallbackLabel(cfg: PluginConfig, slot: FallbackSlot): string {
+  if (slot === "off") return "off";
+  if (slot === "custom") return cfg.customAlias.trim() || "custom";
+  return slot;
 }
 
 function providerHint(cfg: PluginConfig): string {
   if (cfg.backend === "google") return "no key";
   if (cfg.backend === "deepseek") {
-    return `${cfg.deepseekModel}${cfg.deepseekApiKey ? "" : " · no key"}`;
+    return `${cfg.deepseekModel}${cfg.deepseekApiKey ? ` · ${maskSecret(cfg.deepseekApiKey)}` : " · no key"}`;
   }
   if (cfg.backend === "custom") {
+    const alias = cfg.customAlias.trim() || "custom";
     const model = cfg.customModel || "no model";
     const url = cfg.customBaseUrl || "no url";
-    return `${model} · ${url}${cfg.customApiKey ? "" : " · no key"}`;
+    const key = cfg.customApiKey ? maskSecret(cfg.customApiKey) : "no key";
+    return `${alias} · ${model} · ${url} · ${key}`;
   }
-  return `${cfg.hunyuanModel}${cfg.hunyuanApiKey ? "" : " · no key"}`;
+  return `${cfg.hunyuanModel} · ${cfg.hunyuanBaseUrl}${cfg.hunyuanApiKey ? ` · ${maskSecret(cfg.hunyuanApiKey)}` : " · no key"}`;
+}
+
+export function maskSecret(value: string): string {
+  const t = value.trim();
+  if (!t) return "";
+  if (t.length <= 8) return `${t.slice(0, 2)}***${t.slice(-1)}`;
+  return `${t.slice(0, 4)}***${t.slice(-4)}`;
 }
 
 async function pickBackend(ctx: ExtensionContext, current: Backend): Promise<Backend | undefined> {
@@ -217,11 +242,11 @@ async function pickOrType(
       label: p.label,
       description: p.label === current ? `Current · ${p.description}` : p.description,
     })),
-    { label: "custom", description: current ? `Current: ${current}` : "Type a value" },
+    { label: "custom", description: current ? `now: ${current}` : "Type a value" },
   ]);
   if (label === undefined) return undefined;
   if (label !== "custom") return label;
-  const typed = await ctx.ui.input(title, current);
+  const typed = await ctx.ui.input(current ? `${title} [${current}]` : title, current);
   if (typed === undefined) return undefined;
   return typed.trim() || current;
 }
@@ -231,8 +256,10 @@ async function promptSecret(
   title: string,
   current: string,
 ): Promise<string | undefined> {
-  const typed = await ctx.ui.input(title, current ? "leave empty to keep current" : "paste key");
+  const masked = current ? maskSecret(current) : "";
+  const typed = await ctx.ui.input(masked ? `${title} [${masked}]` : title, masked || "paste key");
   if (typed === undefined) return undefined;
   const trimmed = typed.trim();
-  return trimmed || current;
+  if (!trimmed || trimmed === masked) return current;
+  return trimmed;
 }

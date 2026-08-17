@@ -52,6 +52,7 @@ export async function loadConfig(): Promise<PluginConfig> {
     customApiKey: asString(merged.customApiKey, DEFAULT_CONFIG.customApiKey),
     customBaseUrl: asString(merged.customBaseUrl, DEFAULT_CONFIG.customBaseUrl),
     customModel: asString(merged.customModel, DEFAULT_CONFIG.customModel),
+    customAlias: asString(merged.customAlias, DEFAULT_CONFIG.customAlias),
   };
 }
 

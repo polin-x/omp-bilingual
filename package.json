@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -105,6 +105,11 @@
         "type": "string",
         "default": "",
         "description": "Custom model id"
+      },
+      "customAlias": {
+        "type": "string",
+        "default": "",
+        "description": "Display name for the custom provider"
       }
     }
   }

@@ -1,9 +1,25 @@
 import { expect, test } from "bun:test";
 
-test("thinking flush helper is defined before use", async () => {
+const REQUIRED = [
+  "flushThinkingTranslate",
+  "queueThinkingTranslate",
+  "reviewKeyOf",
+  "paintReviews",
+  "postTextCard",
+  "paintTextCards",
+  "pairsFromCache",
+];
+
+const ORDERED = ["flushThinkingTranslate", "reviewKeyOf", "paintReviews"];
+
+test("critical helpers are defined", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
-  const definedAt = src.search(/const flushThinkingTranslate\s*=/);
-  const usedAt = src.search(/\bflushThinkingTranslate\s*\(/);
-  expect(definedAt).toBeGreaterThan(-1);
-  expect(usedAt).toBeGreaterThan(definedAt);
+  for (const name of REQUIRED) {
+    expect(src.search(new RegExp(`const ${name}\\s*=`)), `${name} defined`).toBeGreaterThan(-1);
+  }
+  for (const name of ORDERED) {
+    const definedAt = src.search(new RegExp(`const ${name}\\s*=`));
+    const usedAt = src.search(new RegExp(`\\b${name}\\s*\\(`));
+    expect(usedAt, `${name} used`).toBeGreaterThan(definedAt);
+  }
 });
