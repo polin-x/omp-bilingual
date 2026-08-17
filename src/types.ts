@@ -1,6 +1,6 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.13";
+export const PACKAGE_VERSION = "0.1.14";
 
 export type Backend = "google" | "deepseek" | "hunyuan";
 
@@ -66,6 +66,7 @@ export const ORNAMENT_PRESETS: OrnamentSpec[] = [
   { id: "globe", name: "globe", frames: ["🌍", "🌎", "🌏"] },
   { id: "shinchan", name: "shinchan", frames: ["小新", "小☆", "☆新", "小新"] },
   { id: "lulu", name: "lulu", frames: ["✧🧡", "+🧡", "×🧡", "+🧡"] },
+  { id: "file", name: "file", frames: ["IMG"] },
   { id: "gif", name: "gif", frames: ["GIF"] },
 ];
 export function resolveOrnament(value: string): OrnamentSpec {

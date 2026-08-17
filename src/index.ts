@@ -3,6 +3,7 @@ import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { loadGifFrames, type GifFrame } from "./gif.ts";
+import { prepareOrnamentGif } from "./ornament-store.ts";
 import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
 import { CUSTOM_TYPE, DEFAULT_CONFIG, PACKAGE_VERSION, type Backend, type Pair, type PluginConfig } from "./types.ts";
@@ -299,7 +300,8 @@ async function safeLoadGif(path: string, pi: ExtensionAPI): Promise<GifFrame[]> 
   const file = path.trim();
   if (!file) return [];
   try {
-    return await loadGifFrames(file);
+    const gif = await prepareOrnamentGif(file);
+    return await loadGifFrames(gif);
   } catch (err) {
     pi.logger.error("bilingual gif load failed", {
       path: file,

@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "type": "module",
   "license": "MIT",
   "description": "Paragraph-level Chinese/English cards for English assistant replies",
@@ -47,7 +47,7 @@
       "ornamentGif": {
         "type": "string",
         "default": "",
-        "description": "Path to an animated GIF played above thinking translations"
+        "description": "Path to a GIF or still image. Stills are converted to GIF under ~/.omp/agent/bilingual-ornaments"
       },
       "thinkingDebounceMs": {
         "type": "number",

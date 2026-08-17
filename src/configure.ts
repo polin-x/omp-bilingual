@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
+import { prepareOrnamentGif } from "./ornament-store.ts";
 import type { Backend, PluginConfig } from "./types.ts";
 import { ORNAMENT_PRESETS, TARGET_LANGUAGES, languageName, resolveOrnament } from "./types.ts";
 
@@ -81,10 +82,19 @@ async function editItem(
       })),
     );
     if (picked === undefined) return undefined;
-    if (picked === "gif" || picked === "lulu") {
-      const gif = await ctx.ui.input("Lulu / ornament GIF path", cfg.ornamentGif);
-      if (gif === undefined) return undefined;
-      return { ...cfg, ornament: picked, ornamentGif: gif.trim() };
+    if (picked === "gif" || picked === "lulu" || picked === "file") {
+      const raw = await ctx.ui.input("Image or GIF path", cfg.ornamentGif);
+      if (raw === undefined) return undefined;
+      const source = raw.trim();
+      if (!source) return { ...cfg, ornament: picked, ornamentGif: "" };
+      try {
+        const stored = await prepareOrnamentGif(source);
+        ctx.ui.notify(`Ornament saved · ${stored}`, "info");
+        return { ...cfg, ornament: picked, ornamentGif: source };
+      } catch (err) {
+        ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
+        return undefined;
+      }
     }
     return { ...cfg, ornament: picked };
   }
