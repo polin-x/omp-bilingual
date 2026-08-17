@@ -3,7 +3,7 @@ import { loadTranslationCache, saveTranslationCache, translationKey } from "./ca
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
-import { renderBilingualCard, renderPairCard, EnglishReviewView, ThinkingTranslationView } from "./render.ts";
+import { renderBilingualCard, EnglishReviewView, ThinkingTranslationView } from "./render.ts";
 import {
   describeBackend,
   looksLikeTranslation,
@@ -57,6 +57,13 @@ export default function bilingual(pi: ExtensionAPI): void {
   }));
 
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
+  let configReady = false;
+  const boot = (async () => {
+    liveConfig = await loadConfig();
+    const disk = await loadTranslationCache();
+    for (const [k, zh] of disk) paraZh.set(k, zh);
+    configReady = true;
+  })();
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
   let thinkingTimer: unknown;
@@ -70,7 +77,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
 
   const cachedZh = (en: string) => paraZh.get(keyOf(en));
-
   const schedulePersist = () => {
     if (!scheduleTimer) return;
     if (persistTimer != null) cancelTimer?.(persistTimer);
@@ -132,7 +138,9 @@ export default function bilingual(pi: ExtensionAPI): void {
       requestRender?.();
       return out;
     } catch (err) {
-      for (const p of fresh) rememberFail(p);
+      if (!isRetryableTranslateError(err)) {
+        for (const p of fresh) rememberFail(p);
+      }
       throw err;
     } finally {
       for (const p of fresh) paraBusy.delete(keyOf(p));
@@ -151,30 +159,27 @@ export default function bilingual(pi: ExtensionAPI): void {
     });
   };
 
-  const showTextWidget = (texts: string[]) => {
-    if (!ui) return;
-    if (!liveConfig.enabled || !liveConfig.translateText) {
-      ui.setWidget("bilingual", undefined);
-      return;
-    }
+  const postTextCard = (texts: string[]) => {
+    if (!liveConfig.enabled || !liveConfig.translateText) return;
     const pairs: Pair[] = [];
     for (const en of texts) {
       const zh = cachedZh(en);
       if (zh) pairs.push({ en, zh, kind: "text" });
     }
-    if (pairs.length === 0) {
-      ui.setWidget("bilingual", undefined);
-      return;
-    }
-    const details: BilingualDetails = {
-      pairs,
-      backend: liveConfig.backend,
-      ornament: liveConfig.ornament,
-    };
-    ui.setWidget(
-      "bilingual",
-      (_tui, theme) => renderPairCard(details, theme) ?? { render: () => [] },
-      { placement: "aboveEditor" },
+    if (pairs.length === 0) return;
+    pi.sendMessage(
+      {
+        customType: CUSTOM_TYPE,
+        content: "",
+        display: true,
+        attribution: "agent",
+        details: {
+          pairs,
+          backend: liveConfig.backend,
+          ornament: liveConfig.ornament,
+        },
+      },
+      { triggerTurn: false },
     );
   };
 
@@ -226,12 +231,27 @@ export default function bilingual(pi: ExtensionAPI): void {
   const applyUi = (next: ExtensionUIContext) => {
     ui = next;
     next.setStatus("bilingual", barStatus(liveConfig));
-    if (!liveConfig.enabled || !liveConfig.translateText) next.setWidget("bilingual", undefined);
+    next.setWidget("bilingual", undefined);
     next.setWidget("bilingual-review", undefined);
   };
 
+  const queueThinkingTranslate = (paras: string[], requestRender: () => void) => {
+    thinkingQueued = { paras, requestRender };
+    if (!scheduleTimer) {
+      void boot.then(() => {
+        if (thinkingQueued) flushThinkingTranslate();
+      });
+      return;
+    }
+    if (thinkingTimer != null) {
+      cancelTimer?.(thinkingTimer);
+      thinkingTimer = undefined;
+    }
+    thinkingTimer = scheduleTimer(flushThinkingTranslate, liveConfig.thinkingDebounceMs);
+  };
+
   pi.registerAssistantThinkingRenderer((context, theme) => {
-    if (!liveConfig.enabled || !liveConfig.translateThinking) return undefined;
+    if (configReady && (!liveConfig.enabled || !liveConfig.translateThinking)) return undefined;
     const { closed, open } = partitionTranslatableParagraphs(context.text);
     const paras = open ? [...closed, open] : closed;
     if (paras.length === 0) return undefined;
@@ -244,22 +264,14 @@ export default function bilingual(pi: ExtensionAPI): void {
     const freshClosed = closed.filter(
       (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
     );
-    if (freshClosed.length === 0 || !scheduleTimer) return view;
-    thinkingQueued = { paras: freshClosed, requestRender: lastThinkingRender };
-    if (thinkingTimer != null) {
-      cancelTimer?.(thinkingTimer);
-      thinkingTimer = undefined;
-    }
-    thinkingTimer = scheduleTimer(flushThinkingTranslate, liveConfig.thinkingDebounceMs);
+    if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, lastThinkingRender);
     return view;
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    await boot;
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
-    liveConfig = await loadConfig();
-    const disk = await loadTranslationCache();
-    for (const [k, zh] of disk) paraZh.set(k, zh);
     applyUi(ctx.ui);
   });
 
@@ -310,7 +322,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (paras.length === 0) return;
     void translateFresh(paras, lastThinkingRender)
       .then(() => {
-        showTextWidget(texts);
+        postTextCard(texts);
       })
       .catch((err) => {
         pi.logger.error("bilingual translate failed", {
@@ -431,6 +443,11 @@ function isBilingualContextMessage(message: { role?: string; customType?: string
   if (message.role !== "custom") return false;
   const type = message.customType ?? "";
   return type === CUSTOM_TYPE || type === REVIEW_TYPE || type.startsWith("com.omp.bilingual");
+}
+
+function isRetryableTranslateError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /HTTP (429|5\d\d)|timeout|fetch|socket|ECONN|network|aborted/i.test(msg);
 }
 
 function messageHasToolCalls(message: { content?: unknown }): boolean {
