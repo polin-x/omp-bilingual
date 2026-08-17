@@ -10,10 +10,10 @@ Oh My Pi 插件：把模型回复里的**英文段落**译成中英对照，原�
 
 | 位置 | 行为 |
 |---|---|
-| thinking 斜体框 | 英文下面紧跟一行中文：左侧 `│`，accent 色 |
-| 回合结束 | 若还有未译的英文散文，下方追加一张对照卡 |
+| thinking 斜体框 | 回合结束后补一行中文。只画在 TUI，不写 session |
+| 终局英文回复 | 编辑器上方一张对照卡（widget）。不 `sendMessage` |
 | 不译 | 代码块、`$` 命令、路径、GFM 表格、标题、已是中文的段落 |
-| 不进主模型 | 译文不 `steer`、不进下一轮 `convertToLlm` |
+| 不进主模型 | 不写 custom 消息，不注册 `context` 钩子，不 `steer` |
 
 行内 `` `code` ``、`**粗体**` 先占位再译，译完还原。
 
@@ -77,9 +77,11 @@ omp plugin link /path/to/omp-bilingual
 
 ## 已知限制
 
-- 工具跑完后 host 会重建 transcript，**工具前的 thinking 译文可能被拆掉**。工具后、尚未重建的 thinking 能留下。
-- 终局回复已经是中文时，不会出对照卡。
-- 对照卡在整轮 idle 后才贴，避免译文 `steer` 进主模型。
+- 翻译在整轮 `agent_end` 之后后台跑。`message_end` 只收集原文，不发网、不 await。
+- 不注册 `context` 钩子，避免每轮 LLM 前 `structuredClone` 整份历史。
+- 旧会话里已经写入的对照卡仍在 JSONL。host 会把它们当 developer 消息。升级后请 `/new`。
+- 工具跑完后 host 会重建 transcript，**工具前的 thinking 译文可能被拆掉**。
+- 终局回复已经是中文时，不显示对照。
 - Google 免费接口非正式产品 API，可能限流或抽风。
 
 ## 发布

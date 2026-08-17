@@ -47,9 +47,14 @@ export function renderBilingualCard(
 ): Component | undefined {
   if (message.customType !== CUSTOM_TYPE) return undefined;
   const details = isBilingualDetails(message.details) ? message.details : undefined;
-  const pairs = details?.pairs ?? [];
+  if (!details) return undefined;
+  return renderPairCard(details, theme);
+}
+
+export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Component | undefined {
+  const pairs = details.pairs;
   if (pairs.length === 0) return undefined;
-  const ornament = details?.ornament ?? "globe";
+  const ornament = details.ornament ?? "globe";
 
   const mdTheme = markdownTheme(theme);
   const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
@@ -72,7 +77,7 @@ export function renderBilingualCard(
     box.addChild(markedZh(pair.zh, theme, mdTheme, ornament, false));
     if (i < pairs.length - 1) box.addChild(new Spacer(1));
   }
-  box.addChild(new CornerTag(theme.fg("dim", `译·${details?.backend ?? "google"}`)));
+  box.addChild(new CornerTag(theme.fg("dim", `译·${details.backend}`)));
   return box;
 }
 

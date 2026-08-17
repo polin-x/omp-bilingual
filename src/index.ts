@@ -1,18 +1,17 @@
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractSourceParagraphs, partitionTranslatableParagraphs } from "./extract.ts";
 import { loadGifFrames, type GifFrame } from "./gif.ts";
 import { ornamentMediaPath, prepareOrnamentGif } from "./ornament-store.ts";
-import { renderBilingualCard, ThinkingTranslationView } from "./render.ts";
+import { renderBilingualCard, renderPairCard, ThinkingTranslationView } from "./render.ts";
 import { describeBackend, translateParagraphs } from "./translate.ts";
 import {
-  bilingualDisplayCard,
   CUSTOM_TYPE,
   DEFAULT_CONFIG,
-  isBilingualMessage,
   PACKAGE_VERSION,
   type Backend,
+  type BilingualDetails,
   type Pair,
   type PluginConfig,
 } from "./types.ts";
@@ -20,16 +19,15 @@ import {
 export default function bilingual(pi: ExtensionAPI): void {
   pi.setLabel("Bilingual");
 
+  // Old sessions may still contain cards. Render them; we never write new ones.
   pi.registerMessageRenderer(CUSTOM_TYPE, (message, _opts, theme) => renderBilingualCard(message, theme));
 
   const paraZh = new Map<string, string>();
   const paraFailed = new Set<string>();
   const paraBusy = new Set<string>();
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
-  let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let lastThinkingRender: (() => void) | undefined;
-  let sessionIsIdle: (() => boolean) | undefined;
-  let pendingTextCard: { pairs: Pair[]; backend: Backend } | undefined;
+  let ui: ExtensionUIContext | undefined;
   let gifFrames: GifFrame[] = [];
   let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
 
@@ -73,40 +71,37 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
-  const postTextCard = () => {
-    const card = pendingTextCard;
-    pendingTextCard = undefined;
-    if (!card || card.pairs.length === 0) return;
-    if (sessionIsIdle && !sessionIsIdle()) {
-      pendingTextCard = card;
+  const showTextWidget = (texts: string[]) => {
+    if (!ui) return;
+    if (!liveConfig.enabled || !liveConfig.translateText) {
+      ui.setWidget("bilingual", undefined);
       return;
     }
-    pi.sendMessage(bilingualDisplayCard(card.pairs, card.backend, liveConfig.ornament), { triggerTurn: false });
-  };
-
-  const scheduleTextCard = () => {
-    const tick = () => {
-      if (!pendingTextCard) return;
-      if (!sessionIsIdle || sessionIsIdle()) {
-        postTextCard();
-        return;
-      }
-      if (scheduleTimer) scheduleTimer(tick, 150);
-      else postTextCard();
-    };
-    tick();
-  };
-
-  const queueTextCard = (texts: string[]) => {
-    if (!liveConfig.enabled || !liveConfig.translateText) return;
     const pairs: Pair[] = [];
     for (const en of texts) {
       const zh = paraZh.get(en);
       if (zh) pairs.push({ en, zh, kind: "text" });
     }
-    if (pairs.length === 0) return;
-    pendingTextCard = { pairs, backend: liveConfig.backend };
-    scheduleTextCard();
+    if (pairs.length === 0) {
+      ui.setWidget("bilingual", undefined);
+      return;
+    }
+    const details: BilingualDetails = {
+      pairs,
+      backend: liveConfig.backend,
+      ornament: liveConfig.ornament,
+    };
+    ui.setWidget(
+      "bilingual",
+      (_tui, theme) => renderPairCard(details, theme) ?? { render: () => [] },
+      { placement: "aboveEditor" },
+    );
+  };
+
+  const applyUi = (next: ExtensionUIContext) => {
+    ui = next;
+    next.setStatus("bilingual", barStatus(liveConfig));
+    if (!liveConfig.enabled || !liveConfig.translateText) next.setWidget("bilingual", undefined);
   };
 
   pi.registerAssistantThinkingRenderer((context, theme) => {
@@ -127,19 +122,17 @@ export default function bilingual(pi: ExtensionAPI): void {
     return view;
   });
 
-  pi.on("context", (event) => ({
-    messages: event.messages.filter((m) => !isBilingualMessage(m)),
-  }));
-
   pi.on("session_start", async (_event, ctx) => {
-    scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     liveConfig = await loadConfig();
-    sessionIsIdle = () => ctx.isIdle();
-    gifFrames = await safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi);
-    ctx.setInterval(() => {
-      lastThinkingRender?.();
-    }, gifFrames.length > 1 ? 90 : 220);
-    ctx.ui.setStatus("bilingual", barStatus(liveConfig));
+    applyUi(ctx.ui);
+    void safeLoadGif(ornamentMediaPath(liveConfig.ornament, liveConfig.ornamentGif), pi).then((frames) => {
+      gifFrames = frames;
+    });
+  });
+
+  pi.on("agent_start", () => {
+    pendingHarvest = { thinking: [], texts: [] };
+    ui?.setWidget("bilingual", undefined);
   });
 
   pi.on("message_end", (event) => {
@@ -154,20 +147,14 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", (event) => {
-    if (event.willContinue) {
-      scheduleTextCard();
-      return;
-    }
+    if (event.willContinue) return;
     const { thinking, texts } = pendingHarvest;
     pendingHarvest = { thinking: [], texts: [] };
     const paras = [...thinking, ...texts];
-    if (paras.length === 0) {
-      scheduleTextCard();
-      return;
-    }
+    if (paras.length === 0) return;
     void translateFresh(paras, lastThinkingRender)
       .then(() => {
-        queueTextCard(texts);
+        showTextWidget(texts);
       })
       .catch((err) => {
         pi.logger.error("bilingual translate failed", {
@@ -198,8 +185,10 @@ export default function bilingual(pi: ExtensionAPI): void {
         const next = await runConfigure(ctx);
         if (!next) return;
         liveConfig = next;
-        gifFrames = await safeLoadGif(ornamentMediaPath(next.ornament, next.ornamentGif), pi);
-        ctx.ui.setStatus("bilingual", barStatus(next));
+        applyUi(ctx.ui);
+        void safeLoadGif(ornamentMediaPath(next.ornament, next.ornamentGif), pi).then((frames) => {
+          gifFrames = frames;
+        });
         ctx.ui.notify(statusLine(next), "info");
         return;
       }
@@ -209,7 +198,7 @@ export default function bilingual(pi: ExtensionAPI): void {
         return;
       }
       liveConfig = next;
-      ctx.ui.setStatus("bilingual", barStatus(next));
+      applyUi(ctx.ui);
       ctx.ui.notify(statusLine(next), "info");
     },
   });

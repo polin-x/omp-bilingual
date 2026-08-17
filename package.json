@@ -1,9 +1,9 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "module",
   "license": "MIT",
-  "description": "Paragraph-level Chinese/English cards for English assistant replies",
+  "description": "Display-only Chinese/English translations for English assistant replies",
   "keywords": ["omp", "oh-my-pi", "extension", "translate", "bilingual"],
   "omp": {
     "extensions": ["./src/index.ts"],
@@ -37,7 +37,7 @@
       "translateText": {
         "type": "boolean",
         "default": true,
-        "description": "Show a translation card directly under English reply text"
+        "description": "Show the latest English reply translation above the editor"
       },
       "ornament": {
         "type": "string",
