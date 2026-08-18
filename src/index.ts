@@ -93,7 +93,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   let thinkingTimer: unknown;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
-  let liveThinks: Array<{ view: ThinkingTranslationView; paras: string[] }> = [];
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
   let pendingHarvest = { thinking: [] as string[], texts: [] as string[], advisors: [] as string[] };
@@ -175,10 +174,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   };
 
   const paintThinking = () => {
-    for (const item of liveThinks) {
-      const zh = item.paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
-      item.view.setZh(zh, stampFor(item.paras));
-    }
     lastThinkingRender?.();
   };
 
@@ -335,8 +330,6 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (paras.length === 0) return undefined;
     lastThinkingRender = () => context.requestRender();
     const view = new ThinkingTranslationView(theme);
-    liveThinks.push({ view, paras });
-    if (liveThinks.length > 24) liveThinks = liveThinks.slice(-24);
     const zh = paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh, stampFor(paras));
     const freshClosed = closed.filter(
