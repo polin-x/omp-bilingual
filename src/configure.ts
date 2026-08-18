@@ -2,6 +2,7 @@ import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
 import type { Backend, CustomLlm, FallbackSlot, PluginConfig } from "./types.ts";
 import { TARGET_LANGUAGES, languageName } from "./types.ts";
+import { describeChain } from "./translate.ts";
 
 export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig | undefined> {
   if (!ctx.hasUI) return undefined;
@@ -148,10 +149,7 @@ async function editMore(ctx: ExtensionContext, cfg: PluginConfig): Promise<Plugi
 function summarize(cfg: PluginConfig): string {
   const on = cfg.enabled ? "on" : "off";
   const think = cfg.translateThinking ? "thinking" : "no-thinking";
-  const chain = [backendLabel(cfg), fallbackLabel(cfg, cfg.fallback1), fallbackLabel(cfg, cfg.fallback2)]
-    .filter((s) => s !== "off")
-    .join("|");
-  return `${on} · ${chain} · ${cfg.target} · ${think}`;
+  return `${on} · ${describeChain(cfg)} · ${cfg.target} · ${think}`;
 }
 
 function customNames(cfg: PluginConfig): string {
