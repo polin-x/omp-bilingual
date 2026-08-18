@@ -43,7 +43,7 @@ export function findLastTranslatableAssistant(
     const sources = extractSourceParagraphs(message);
     const texts = sources.filter((s) => s.kind === "text").map((s) => s.text);
     const thinking = sources.filter((s) => s.kind === "thinking").map((s) => s.text);
-    if (texts.length === 0 && thinking.length === 0) continue;
+    if (texts.length === 0) continue;
     const later = entries.slice(i + 1);
     const alreadyCarded = later.some((next) => next.type === "message" && next.message && isCard(next.message));
     return { texts, thinking, alreadyCarded };

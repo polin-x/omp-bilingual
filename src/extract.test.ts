@@ -68,3 +68,28 @@ test("findLastTranslatableAssistant skips a later Chinese-only assistant", () =>
   expect(hit?.texts).toEqual(["Implemented and pushed."]);
   expect(hit?.alreadyCarded).toBe(false);
 });
+
+test("findLastTranslatableAssistant skips later Chinese text with English thinking", () => {
+  const hit = findLastTranslatableAssistant(
+    [
+      {
+        type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "Implemented and pushed." }] },
+      },
+      { type: "message", message: { role: "custom", customType: "advisor", content: "" } },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "I should rewrite the previous answer in Chinese." },
+            { type: "text", text: "已修正用词。" },
+          ],
+        },
+      },
+    ],
+    (m) => m.customType === "com.omp.bilingual",
+  );
+  expect(hit?.texts).toEqual(["Implemented and pushed."]);
+  expect(hit?.thinking).toEqual([]);
+});
