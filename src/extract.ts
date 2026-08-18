@@ -27,6 +27,30 @@ export function extractSourceParagraphs(message: { role?: string; content?: unkn
   return out;
 }
 
+export type SessionLikeEntry = {
+  type?: string;
+  message?: { role?: string; content?: unknown; customType?: string };
+};
+
+export function findLastTranslatableAssistant(
+  entries: ReadonlyArray<SessionLikeEntry>,
+  isCard: (message: { role?: string; customType?: string }) => boolean,
+): { texts: string[]; thinking: string[]; alreadyCarded: boolean } | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    const message = entry?.message;
+    if (entry?.type !== "message" || !message || message.role !== "assistant") continue;
+    const sources = extractSourceParagraphs(message);
+    const texts = sources.filter((s) => s.kind === "text").map((s) => s.text);
+    const thinking = sources.filter((s) => s.kind === "thinking").map((s) => s.text);
+    if (texts.length === 0 && thinking.length === 0) continue;
+    const later = entries.slice(i + 1);
+    const alreadyCarded = later.some((next) => next.type === "message" && next.message && isCard(next.message));
+    return { texts, thinking, alreadyCarded };
+  }
+  return undefined;
+}
+
 export function extractAdvisorParagraphs(message: {
   role?: string;
   customType?: string;

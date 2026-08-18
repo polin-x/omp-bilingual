@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { extractAdvisorParagraphs, extractSourceParagraphs, splitTranslatableParagraphs } from "./extract.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, splitTranslatableParagraphs } from "./extract.ts";
 
 test("extractAdvisorParagraphs pulls English notes only", () => {
   const texts = extractAdvisorParagraphs({
@@ -51,4 +51,20 @@ test("extractSourceParagraphs reads assistant text blocks", () => {
     content: [{ type: "text", text: "Implemented and pushed.\n\nOn every VPN connection attempt:" }],
   });
   expect(out.map((p) => p.text)).toEqual(["Implemented and pushed.", "On every VPN connection attempt:"]);
+});
+
+test("findLastTranslatableAssistant skips a later Chinese-only assistant", () => {
+  const hit = findLastTranslatableAssistant(
+    [
+      {
+        type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "Implemented and pushed." }] },
+      },
+      { type: "message", message: { role: "custom", customType: "advisor", content: "" } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "已修正用词。" }] } },
+    ],
+    (m) => m.customType === "com.omp.bilingual",
+  );
+  expect(hit?.texts).toEqual(["Implemented and pushed."]);
+  expect(hit?.alreadyCarded).toBe(false);
 });

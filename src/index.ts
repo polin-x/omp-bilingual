@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractAdvisorParagraphs, extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, TextCardView, ThinkingTranslationView } from "./render.ts";
 import { bindThinkingRefresh } from "./thinking-refresh.ts";
 import {
@@ -344,34 +344,21 @@ export default function bilingual(pi: ExtensionAPI): void {
     entries: ReadonlyArray<{ type?: string; message?: { role?: string; content?: unknown; customType?: string } }>,
   ) => {
     if (!liveConfig.enabled) return;
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const entry = entries[i];
-      const message = entry?.message;
-      if (entry?.type !== "message" || !message || message.role !== "assistant") continue;
-      const later = entries.slice(i + 1);
-      const alreadyCarded = later.some(
-        (next) => next.type === "message" && next.message && isBilingualContextMessage(next.message),
-      );
-      const sources = extractSourceParagraphs(message);
-      const texts = liveConfig.translateText
-        ? sources.filter((s) => s.kind === "text").map((s) => s.text)
-        : [];
-      const thinking = liveConfig.translateThinking
-        ? sources.filter((s) => s.kind === "thinking").map((s) => s.text)
-        : [];
-      if (!alreadyCarded && texts.length > 0) postTextCard(texts);
-      const paras = [...thinking, ...texts];
-      if (paras.length === 0) return;
-      void translateFresh(paras, () => {
-        paintTextCards(texts);
-        lastThinkingRender?.();
-      }).catch((err) => {
-        pi.logger.error("bilingual existing translate failed", {
-          err: err instanceof Error ? err.message : String(err),
-        });
+    const hit = findLastTranslatableAssistant(entries, isBilingualContextMessage);
+    if (!hit) return;
+    const texts = liveConfig.translateText ? hit.texts : [];
+    const thinking = liveConfig.translateThinking ? hit.thinking : [];
+    if (!hit.alreadyCarded && texts.length > 0) postTextCard(texts);
+    const paras = [...thinking, ...texts];
+    if (paras.length === 0) return;
+    void translateFresh(paras, () => {
+      paintTextCards(texts);
+      lastThinkingRender?.();
+    }).catch((err) => {
+      pi.logger.error("bilingual existing translate failed", {
+        err: err instanceof Error ? err.message : String(err),
       });
-      return;
-    }
+    });
   };
 
   pi.on("session_start", async (_event, ctx) => {
@@ -393,8 +380,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_start", () => {
-    pendingHarvest.thinking = [];
-    pendingHarvest.texts = [];
     ui?.setWidget("bilingual", undefined);
   });
 
