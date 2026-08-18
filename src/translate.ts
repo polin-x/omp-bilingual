@@ -50,8 +50,7 @@ export async function translateParagraphs(
   const { pairs, via } = await firstSuccess(
     resolvedBackends(config).map((backend) => async (taskSignal) => ({
       pairs: await translateOnce(paragraphs, config, backend, taskSignal),
-      via:
-        backend.kind === "custom" ? backend.llm.alias.trim() || backend.llm.model || "custom" : backend.kind,
+      via: describeResolved(backend, config),
     })),
     signal,
   );
@@ -385,13 +384,13 @@ function parseEnglishReview(raw: string, source: string): EnglishReview | undefi
 export function describeBackend(backend: Backend, config?: PluginConfig): string {
   switch (backend) {
     case "google":
-      return "google (free)";
+      return "google";
     case "deepseek":
-      return "deepseek";
+      return config?.deepseekModel || "deepseek";
     case "hunyuan":
-      return "hunyuan";
+      return config?.hunyuanModel || "hunyuan";
     case "custom": {
-      const names = (config?.customs ?? []).map((c) => c.alias.trim() || c.model || "custom");
+      const names = (config?.customs ?? []).map((c) => describeCustom(c.alias, c.model));
       return names.length > 0 ? names.join("|") : "custom";
     }
   }
@@ -399,11 +398,20 @@ export function describeBackend(backend: Backend, config?: PluginConfig): string
 
 export function describeChain(config: PluginConfig): string {
   return resolvedBackends(config)
-    .map((backend) => {
-      if (backend.kind === "custom") return backend.llm.alias.trim() || backend.llm.model || "custom";
-      return describeBackend(backend.kind, config);
-    })
+    .map((backend) => describeResolved(backend, config))
     .join("|");
+}
+
+function describeResolved(backend: ResolvedBackend, config: PluginConfig): string {
+  if (backend.kind === "custom") return describeCustom(backend.llm.alias, backend.llm.model);
+  return describeBackend(backend.kind, config);
+}
+
+function describeCustom(alias: string, model: string): string {
+  const name = alias.trim();
+  const id = model.trim();
+  if (name && id) return `${name}/${id}`;
+  return name || id || "custom";
 }
 
 async function firstSuccess<T>(
