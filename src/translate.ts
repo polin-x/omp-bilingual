@@ -46,12 +46,18 @@ export async function translateParagraphs(
   signal?: AbortSignal,
 ): Promise<Pair[]> {
   if (paragraphs.length === 0) return [];
-  return firstSuccess(
-    resolvedBackends(config).map(
-      (backend) => (taskSignal) => translateOnce(paragraphs, config, backend, taskSignal),
-    ),
+  const started = Date.now();
+  const { pairs, via } = await firstSuccess(
+    resolvedBackends(config).map((backend) => async (taskSignal) => ({
+      pairs: await translateOnce(paragraphs, config, backend, taskSignal),
+      via:
+        backend.kind === "custom" ? backend.llm.alias.trim() || backend.llm.model || "custom" : backend.kind,
+    })),
     signal,
   );
+  const last = pairs[pairs.length - 1];
+  if (!last) return pairs;
+  return [...pairs.slice(0, -1), { ...last, alias: via, delayMs: Math.max(0, Date.now() - started) }];
 }
 
 async function translateOnce(

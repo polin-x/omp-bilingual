@@ -4,7 +4,7 @@ import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
 import type { BilingualDetails, Pair } from "./types.ts";
 import type { EnglishReview } from "./translate.ts";
-import { CUSTOM_TYPE } from "./types.ts";
+import { CUSTOM_TYPE, translationSuffix } from "./types.ts";
 
 type ThemeLike = {
   fg(color: string, text: string): string;
@@ -49,7 +49,7 @@ export function renderBilingualCard(
   if (message.customType !== CUSTOM_TYPE) return undefined;
   const details = isBilingualDetails(message.details) ? message.details : undefined;
   if (!details) return undefined;
-  return new TextCardView(theme, details.backend, details.pairs ?? []);
+  return new TextCardView(theme, details.chain || details.backend, details.pairs ?? []);
 }
 
 export class TextCardView implements Component {
@@ -71,7 +71,12 @@ export class TextCardView implements Component {
 
   render(width: number): readonly string[] {
     if (this.#pairs.length === 0) return [];
-    return renderPairCard({ pairs: this.#pairs, backend: this.backend as BilingualDetails["backend"] }, this.theme)?.render(width) ?? [];
+    return (
+      renderPairCard(
+        { pairs: this.#pairs, backend: this.backend as BilingualDetails["backend"], chain: this.backend },
+        this.theme,
+      )?.render(width) ?? []
+    );
   }
 }
 
@@ -90,6 +95,8 @@ export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Com
     const pair = pairs[i]!;
     const thinking = pair.kind === "thinking";
     const advisor = pair.kind === "advisor";
+    const last = i === pairs.length - 1;
+    const zh = `${pair.zh}${last ? translationSuffix(pair.alias, pair.delayMs) : ""}`;
     box.addChild(
       new Trimmed(
         new Markdown(advisor ? `EN  ${pair.en}` : pair.en, 0, 0, mdTheme, {
@@ -98,10 +105,14 @@ export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Com
         }),
       ),
     );
-    box.addChild(markedZh(advisor ? `中  ${pair.zh}` : pair.zh, theme, mdTheme));
+    box.addChild(markedZh(advisor ? `中  ${zh}` : zh, theme, mdTheme));
     if (i < pairs.length - 1) box.addChild(new Spacer(1));
   }
-  box.addChild(new CornerTag(theme.fg("dim", pairs.some((p) => p.kind === "advisor") ? "译·advisor" : `译·${details.backend}`)));
+  box.addChild(
+    new CornerTag(
+      theme.fg("dim", pairs.some((p) => p.kind === "advisor") ? "译·advisor" : `译·${details.chain || details.backend}`),
+    ),
+  );
   return box;
 }
 
@@ -152,17 +163,23 @@ class Prefixed implements Component {
 
 export class ThinkingTranslationView implements Component {
   #zh = "";
+  #alias?: string;
+  #delayMs?: number;
   constructor(private readonly theme: ThemeLike) {}
 
-  setZh(zh: string): void {
+  setZh(zh: string, stamp?: { alias: string; delayMs: number }): void {
     this.#zh = zh;
+    this.#alias = stamp?.alias;
+    this.#delayMs = stamp?.delayMs;
   }
 
   invalidate(): void {}
 
   render(width: number): readonly string[] {
     if (!this.#zh) return [];
-    return renderThinkingTranslation(this.#zh, this.theme).render(width);
+    return renderThinkingTranslation(`${this.#zh}${translationSuffix(this.#alias, this.#delayMs)}`, this.theme).render(
+      width,
+    );
   }
 }
 

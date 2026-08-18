@@ -1,7 +1,7 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const REVIEW_TYPE = "com.omp.bilingual.review";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.45";
+export const PACKAGE_VERSION = "0.1.46";
 
 export type ReviewDetails = {
   source: string;
@@ -21,12 +21,20 @@ export type Pair = {
   en: string;
   zh: string;
   kind?: "text" | "thinking" | "advisor";
+  alias?: string;
+  delayMs?: number;
 };
+
+export function translationSuffix(alias?: string, delayMs?: number): string {
+  if (!alias || typeof delayMs !== "number") return "";
+  return ` · ${alias} ${delayMs}ms`;
+}
 
 export type BilingualDetails = {
   pairs?: Pair[];
   texts?: string[];
   backend: Backend;
+  chain?: string;
   ornament?: string;
   kind?: Pair["kind"];
 };

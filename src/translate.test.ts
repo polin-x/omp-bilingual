@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { backendChain, describeChain, resolvedBackends, reviewEnglishPrompt, translateParagraphs } from "./translate.ts";
-import { DEFAULT_CONFIG, type PluginConfig } from "./types.ts";
+import { DEFAULT_CONFIG, translationSuffix, type PluginConfig } from "./types.ts";
 
 const cfg: PluginConfig = {
   ...DEFAULT_CONFIG,
@@ -85,8 +85,53 @@ test("fastest custom wins and aborts the slower one", async () => {
   }) as typeof fetch;
 
   const pairs = await translateParagraphs(["Need git status first."], multi);
-  expect(pairs).toEqual([{ en: "Need git status first.", zh: "先检查 git status。" }]);
+  expect(pairs).toHaveLength(1);
+  expect(pairs[0]?.en).toBe("Need git status first.");
+  expect(pairs[0]?.zh).toBe("先检查 git status。");
+  expect(pairs[0]?.alias).toBe("fast");
+  expect(pairs[0]?.delayMs).toBeGreaterThanOrEqual(0);
+  expect(`${pairs[0]?.zh}${translationSuffix(pairs[0]?.alias, pairs[0]?.delayMs)}`).toMatch(
+    /^先检查 git status。 · fast \d+ms$/,
+  );
   expect(slowAborted).toBe(true);
+});
+
+test("delayMs is the winner latency, not the slower sibling", async () => {
+  const multi: PluginConfig = {
+    ...DEFAULT_CONFIG,
+    backend: "custom",
+    customs: [
+      { alias: "slow", apiKey: "k1", baseUrl: "https://slow.test/v1", model: "m1" },
+      { alias: "fast", apiKey: "k2", baseUrl: "https://fast.test/v1", model: "m2" },
+    ],
+  };
+  let now = 1_000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("slow.test")) {
+        const { promise, reject } = Promise.withResolvers<Response>();
+        const onAbort = () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        };
+        if (init?.signal?.aborted) onAbort();
+        else init?.signal?.addEventListener("abort", onAbort, { once: true });
+        return promise;
+      }
+      now += 40;
+      return translationResponse("先检查 git status。");
+    }) as typeof fetch;
+
+    const pairs = await translateParagraphs(["Need git status first."], multi);
+    expect(pairs[0]?.alias).toBe("fast");
+    expect(pairs[0]?.delayMs).toBe(40);
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 test("bad JSON review still succeeds from a sibling LLM", async () => {
@@ -143,4 +188,10 @@ test("aborted translate rejects after every racer has started", async () => {
     name: "AbortError",
   });
   expect(calls).toBe(2);
+});
+
+test("translationSuffix is display-only", () => {
+  expect(translationSuffix("b.ai", 320)).toBe(" · b.ai 320ms");
+  expect(translationSuffix()).toBe("");
+  expect(translationSuffix("b.ai")).toBe("");
 });

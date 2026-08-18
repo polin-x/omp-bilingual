@@ -29,6 +29,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   const paraZh = new Map<string, string>();
   const paraFailed = new Set<string>();
   const paraBusy = new Set<string>();
+  const stamps = new Map<string, { alias: string; delayMs: number }>();
   const reviews = new Map<string, EnglishReview>();
   const reviewViews: EnglishReviewView[] = [];
   const reviewViewSource = new WeakMap<EnglishReviewView, string>();
@@ -44,7 +45,9 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
     const texts = bilingualTexts(details);
     const kind = "kind" in details && details.kind === "advisor" ? "advisor" : "text";
-    const view = new TextCardView(theme, details.backend, pairsFromCache(texts, kind));
+    const chain =
+      "chain" in details && typeof details.chain === "string" && details.chain ? details.chain : details.backend;
+    const view = new TextCardView(theme, chain, pairsFromCache(texts, kind));
     textViews.push(view);
     textViewSource.set(view, textsKey(texts));
     if (textViews.length > 16) textViews.shift();
@@ -79,7 +82,9 @@ export default function bilingual(pi: ExtensionAPI): void {
   const boot = (async () => {
     liveConfig = await loadConfig();
     const disk = await loadTranslationCache();
-    for (const [k, zh] of disk) paraZh.set(k, zh);
+    for (const [k, text] of disk.zh) paraZh.set(k, text);
+    for (const [k, stamp] of disk.stamps) stamps.set(k, stamp);
+    pi.setLabel(pluginLabel(liveConfig));
     configReady = true;
   })();
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
@@ -103,7 +108,30 @@ export default function bilingual(pi: ExtensionAPI): void {
       const zh = cachedZh(en);
       if (zh) pairs.push({ en, zh, kind });
     }
-    return pairs;
+    return attachStamp(pairs, texts);
+  };
+
+  const stampFor = (texts: string[]) => {
+    for (let i = texts.length - 1; i >= 0; i--) {
+      const hit = stamps.get(keyOf(texts[i]!));
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+
+  const attachStamp = (pairs: Pair[], texts: string[]): Pair[] => {
+    const stamp = stampFor(texts);
+    const last = pairs[pairs.length - 1];
+    if (!stamp || !last) return pairs;
+    return [...pairs.slice(0, -1), { ...last, alias: stamp.alias, delayMs: stamp.delayMs }];
+  };
+
+  const rememberStamp = (en: string, alias: string, delayMs: number) => {
+    stamps.set(keyOf(en), { alias, delayMs });
+    if (stamps.size > 64) {
+      const first = stamps.keys().next().value;
+      if (first !== undefined) stamps.delete(first);
+    }
   };
 
   const paintTextCards = (texts: string[], kind: Pair["kind"] = "text") => {
@@ -120,7 +148,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (persistTimer != null) cancelTimer?.(persistTimer);
     persistTimer = scheduleTimer(() => {
       persistTimer = undefined;
-      void saveTranslationCache(paraZh).catch((err) => {
+      void saveTranslationCache(paraZh, stamps).catch((err) => {
         pi.logger.error("bilingual cache save failed", {
           err: err instanceof Error ? err.message : String(err),
         });
@@ -149,7 +177,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   const paintThinking = () => {
     for (const item of liveThinks) {
       const zh = item.paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
-      item.view.setZh(zh);
+      item.view.setZh(zh, stampFor(item.paras));
     }
     lastThinkingRender?.();
   };
@@ -169,6 +197,9 @@ export default function bilingual(pi: ExtensionAPI): void {
       for (const pair of pairs) {
         if (pair.zh && pair.zh !== pair.en) {
           rememberZh(pair.en, pair.zh);
+          if (pair.alias !== undefined && typeof pair.delayMs === "number") {
+            rememberStamp(pair.en, pair.alias, pair.delayMs);
+          }
           out.push(pair);
         }
       }
@@ -200,6 +231,7 @@ export default function bilingual(pi: ExtensionAPI): void {
           pairs,
           kind,
           backend: liveConfig.backend,
+          chain: describeChain(liveConfig),
           ornament: liveConfig.ornament,
         },
       },
@@ -246,7 +278,7 @@ export default function bilingual(pi: ExtensionAPI): void {
       const review = await reviewEnglishPrompt(text, liveConfig);
       if (!review) return;
       paraZh.set(cacheKey, JSON.stringify(review));
-      void saveTranslationCache(paraZh).catch((err) => {
+      void saveTranslationCache(paraZh, stamps).catch((err) => {
         pi.logger.error("bilingual cache save failed", {
           err: err instanceof Error ? err.message : String(err),
         });
@@ -263,6 +295,7 @@ export default function bilingual(pi: ExtensionAPI): void {
 
   const applyUi = (next: ExtensionUIContext) => {
     ui = next;
+    pi.setLabel(pluginLabel(liveConfig));
     next.setStatus("bilingual", barStatus(liveConfig));
     next.setWidget("bilingual", undefined);
     next.setWidget("bilingual-review", undefined);
@@ -305,7 +338,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     liveThinks.push({ view, paras });
     if (liveThinks.length > 24) liveThinks = liveThinks.slice(-24);
     const zh = paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
-    if (zh) view.setZh(zh);
+    if (zh) view.setZh(zh, stampFor(paras));
     const freshClosed = closed.filter(
       (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
     );
@@ -481,6 +514,11 @@ async function applyCommand(args: string): Promise<PluginConfig | string> {
     "  /bilingual target zh-CN|ja|en|…",
     "  /bilingual google|deepseek|hunyuan|custom",
   ].join("\n");
+}
+
+function pluginLabel(config: PluginConfig): string {
+  if (!config.enabled) return "Bilingual";
+  return `Bilingual · ${describeChain(config)}`;
 }
 
 function barStatus(config: PluginConfig): string {
