@@ -72,11 +72,11 @@ omp plugin link /path/to/omp-bilingual
 **腾讯混元**  
 `configure` 里填 key。Base URL 可选官方 `https://api.hunyuan.cloud.tencent.com/v1` 或 TokenHub `https://tokenhub.tencentmaas.com/v1`，模型可选 `hunyuan-turbos-latest` / `hy3` 或自定义。
 
-**Custom**  
-任意 OpenAI 兼容接口。`/bilingual custom` 后在 `settings` → `provider` 填 base URL、key、model。例如 `https://api.openai.com/v1` + `gpt-4o-mini`，或 OpenRouter / 自建 vLLM。
+**Custom**
+任意 OpenAI 兼容接口，可配多个。`/bilingual settings` → `customs` 添加/编辑/删除。例如 `https://api.openai.com/v1` + `gpt-4o-mini`，或 OpenRouter / 自建 vLLM。旧的单个 `customApiKey` / `customBaseUrl` / `customModel` 会在加载时迁进列表。
 
-**Fallback**  
-`settings` 里可设 `fallback1`、`fallback2`（`off` / `google` / `deepseek` / `hunyuan` / `custom`）。顺序：主后端 → fallback1 → fallback2。失败（限流、缺 key、网络）才试下一个；重复的后端会跳过。
+**Race**
+主后端、fallback、以及每一个 custom LLM **并行请求**。谁先返回可用译文就用谁，其余立即 abort。状态栏用 `|` 列出参赛者，例如 `译:b.ai|openai|google (free)`。
 
 不要把 json 里的 key 提交进 git。
 

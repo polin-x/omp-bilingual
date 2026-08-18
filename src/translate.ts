@@ -1,4 +1,4 @@
-import type { Backend, Pair, PluginConfig } from "./types.ts";
+import type { Backend, CustomLlm, Pair, PluginConfig } from "./types.ts";
 import { languageName } from "./types.ts";
 
 export type EnglishReview = {
@@ -9,6 +9,12 @@ export type EnglishReview = {
 };
 const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 
+export type ResolvedBackend =
+  | { kind: "google" }
+  | { kind: "deepseek" }
+  | { kind: "hunyuan" }
+  | { kind: "custom"; llm: CustomLlm };
+
 export function backendChain(config: PluginConfig): Backend[] {
   const out: Backend[] = [];
   for (const slot of [config.backend, config.fallback1, config.fallback2]) {
@@ -18,33 +24,43 @@ export function backendChain(config: PluginConfig): Backend[] {
   return out.length > 0 ? out : [config.backend];
 }
 
+export function resolvedBackends(config: PluginConfig): ResolvedBackend[] {
+  const out: ResolvedBackend[] = [];
+  for (const kind of backendChain(config)) {
+    if (kind !== "custom") {
+      out.push({ kind });
+      continue;
+    }
+    if (config.customs.length === 0) {
+      out.push({ kind: "custom", llm: { alias: "", apiKey: "", baseUrl: "", model: "" } });
+      continue;
+    }
+    for (const llm of config.customs) out.push({ kind: "custom", llm });
+  }
+  return out;
+}
+
 export async function translateParagraphs(
   paragraphs: string[],
   config: PluginConfig,
   signal?: AbortSignal,
 ): Promise<Pair[]> {
   if (paragraphs.length === 0) return [];
-  const chain = backendChain(config);
-  let last: unknown;
-  for (const backend of chain) {
-    if (signal?.aborted) throw abortError(signal);
-    try {
-      return await translateOnce(paragraphs, config, backend, signal);
-    } catch (err) {
-      if (isAbortError(err, signal)) throw err;
-      last = err;
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last ?? "translation failed"));
+  return firstSuccess(
+    resolvedBackends(config).map(
+      (backend) => (taskSignal) => translateOnce(paragraphs, config, backend, taskSignal),
+    ),
+    signal,
+  );
 }
 
 async function translateOnce(
   paragraphs: string[],
   config: PluginConfig,
-  backend: Backend,
+  backend: ResolvedBackend,
   signal?: AbortSignal,
 ): Promise<Pair[]> {
-  switch (backend) {
+  switch (backend.kind) {
     case "google":
       return translateGoogle(paragraphs, config, signal);
     case "deepseek":
@@ -93,8 +109,8 @@ type OpenAiOpts = {
   target: string;
 };
 
-function openAiOpts(config: PluginConfig, backend: Backend): OpenAiOpts {
-  switch (backend) {
+function openAiOpts(config: PluginConfig, backend: Exclude<ResolvedBackend, { kind: "google" }>): OpenAiOpts {
+  switch (backend.kind) {
     case "deepseek":
       return {
         apiKey: config.deepseekApiKey,
@@ -114,14 +130,14 @@ function openAiOpts(config: PluginConfig, backend: Backend): OpenAiOpts {
       };
     case "custom":
       return {
-        apiKey: config.customApiKey,
-        baseUrl: config.customBaseUrl,
-        model: config.customModel,
-        name: config.customAlias.trim() || "Custom",
+        apiKey: backend.llm.apiKey,
+        baseUrl: backend.llm.baseUrl,
+        model: backend.llm.model,
+        name: backend.llm.alias.trim() || "Custom",
         target: config.target,
       };
     default:
-      throw new Error(`${backend} is not an OpenAI-compatible backend`);
+      return unreachable(backend);
   }
 }
 
@@ -290,21 +306,17 @@ export async function reviewEnglishPrompt(
   config: PluginConfig,
   signal?: AbortSignal,
 ): Promise<EnglishReview | undefined> {
-  const chain = backendChain(config).filter((backend) => backend !== "google");
+  const chain = resolvedBackends(config).filter((backend) => backend.kind !== "google");
   if (chain.length === 0) return undefined;
-  let last: unknown;
-  for (const backend of chain) {
-    if (signal?.aborted) throw abortError(signal);
-    try {
-      const review = await reviewOnce(text, openAiOpts(config, backend), signal);
-      if (!review) throw new Error(`${backend} returned unusable review`);
+  return firstSuccess(
+    chain.map((backend) => async (taskSignal) => {
+      const opts = openAiOpts(config, backend);
+      const review = await reviewOnce(text, opts, taskSignal);
+      if (!review) throw new Error(`${opts.name} returned unusable review`);
       return review;
-    } catch (err) {
-      if (isAbortError(err, signal)) throw err;
-      last = err;
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last ?? "review failed"));
+    }),
+    signal,
+  );
 }
 
 async function reviewOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<EnglishReview | undefined> {
@@ -372,21 +384,57 @@ export function describeBackend(backend: Backend, config?: PluginConfig): string
       return "deepseek";
     case "hunyuan":
       return "hunyuan";
-    case "custom":
-      return config?.customAlias.trim() || "custom";
+    case "custom": {
+      const names = (config?.customs ?? []).map((c) => c.alias.trim() || c.model || "custom");
+      return names.length > 0 ? names.join("|") : "custom";
+    }
   }
 }
 
 export function describeChain(config: PluginConfig): string {
-  return backendChain(config)
-    .map((backend) => describeBackend(backend, config))
-    .join(">");
+  return resolvedBackends(config)
+    .map((backend) => {
+      if (backend.kind === "custom") return backend.llm.alias.trim() || backend.llm.model || "custom";
+      return describeBackend(backend.kind, config);
+    })
+    .join("|");
 }
 
-function isAbortError(err: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted) return true;
-  return err instanceof Error && (err.name === "AbortError" || err.message.toLowerCase().includes("aborted"));
+async function firstSuccess<T>(
+  tasks: Array<(signal: AbortSignal) => Promise<T>>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (tasks.length === 0) throw new Error("no backends");
+  if (tasks.length === 1) {
+    const only = tasks[0];
+    if (!only) throw new Error("no backends");
+    return only(signal ?? new AbortController().signal);
+  }
+
+  const shared = new AbortController();
+  const onParentAbort = () => shared.abort(signal?.reason);
+  signal?.addEventListener("abort", onParentAbort, { once: true });
+  if (signal?.aborted) {
+    signal.removeEventListener("abort", onParentAbort);
+    throw abortError(signal);
+  }
+
+  try {
+    const result = await Promise.any(tasks.map((task) => task(shared.signal)));
+    shared.abort();
+    return result;
+  } catch (err) {
+    if (signal?.aborted) throw abortError(signal);
+    if (err instanceof AggregateError) {
+      const last = err.errors[err.errors.length - 1];
+      throw last instanceof Error ? last : new Error(String(last ?? "translation failed"));
+    }
+    throw err;
+  } finally {
+    signal?.removeEventListener("abort", onParentAbort);
+  }
 }
+
 
 function abortError(signal?: AbortSignal): Error {
   if (signal?.reason instanceof Error) return signal.reason;

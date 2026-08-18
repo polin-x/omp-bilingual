@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -23,13 +23,13 @@
         "type": "enum",
         "values": ["off", "google", "deepseek", "hunyuan", "custom"],
         "default": "off",
-        "description": "First fallback if the primary backend fails"
+        "description": "Also raced with the primary backend; first usable response wins"
       },
       "fallback2": {
         "type": "enum",
         "values": ["off", "google", "deepseek", "hunyuan", "custom"],
         "default": "off",
-        "description": "Second fallback if the first fallback fails"
+        "description": "Also raced with the primary backend; first usable response wins"
       },
       "target": {
         "type": "string",
@@ -94,22 +94,22 @@
       "customApiKey": {
         "type": "string",
         "secret": true,
-        "description": "Custom OpenAI-compatible API key (set via /bilingual settings)"
+        "description": "First custom OpenAI-compatible API key. Add more via /bilingual settings → customs"
       },
       "customBaseUrl": {
         "type": "string",
         "default": "",
-        "description": "Custom OpenAI-compatible base URL, e.g. https://api.openai.com/v1"
+        "description": "First custom OpenAI-compatible base URL. Add more via /bilingual settings → customs"
       },
       "customModel": {
         "type": "string",
         "default": "",
-        "description": "Custom model id"
+        "description": "First custom model id. Add more via /bilingual settings → customs"
       },
       "customAlias": {
         "type": "string",
         "default": "",
-        "description": "Display name for the custom provider"
+        "description": "Display name for the first custom provider"
       }
     }
   }

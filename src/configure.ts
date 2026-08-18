@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { loadConfig, patchConfig } from "./config.ts";
-import type { Backend, FallbackSlot, PluginConfig } from "./types.ts";
+import type { Backend, CustomLlm, FallbackSlot, PluginConfig } from "./types.ts";
 import { TARGET_LANGUAGES, languageName } from "./types.ts";
 
 export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig | undefined> {
@@ -19,6 +19,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
       { label: "review", description: cfg.reviewEnglish ? "check English prompts" : "off" },
       { label: "provider", description: providerHint(cfg) },
+      { label: "customs", description: customsHint(cfg) },
       { label: "more", description: `source ${cfg.sourceLang}` },
     ]);
     if (item === undefined) return undefined;
@@ -91,6 +92,7 @@ async function editItem(
     return { ...cfg, reviewEnglish: v === "on" };
   }
   if (item === "provider") return editProvider(ctx, cfg);
+  if (item === "customs") return editCustoms(ctx, cfg);
   if (item === "more") return editMore(ctx, cfg);
   return undefined;
 }
@@ -110,24 +112,7 @@ async function editProvider(ctx: ExtensionContext, cfg: PluginConfig): Promise<P
     if (model === undefined) return undefined;
     return { ...cfg, deepseekApiKey: apiKey, deepseekModel: model };
   }
-  if (cfg.backend === "custom") {
-    const aliasRaw = await ctx.ui.input("Custom alias", cfg.customAlias || "e.g. b.ai");
-    if (aliasRaw === undefined) return undefined;
-    const customAlias = aliasRaw.trim() || cfg.customAlias;
-    const apiKey = await promptSecret(ctx, "Custom API key", cfg.customApiKey);
-    if (apiKey === undefined) return undefined;
-    const baseUrl = await pickOrType(ctx, "Custom base URL", cfg.customBaseUrl, [
-      { label: "https://api.openai.com/v1", description: "OpenAI" },
-      { label: "https://openrouter.ai/api/v1", description: "OpenRouter" },
-    ]);
-    if (baseUrl === undefined) return undefined;
-    const model = await pickOrType(ctx, "Custom model", cfg.customModel, [
-      { label: "gpt-4o-mini", description: "OpenAI cheap" },
-      { label: "gpt-4o", description: "OpenAI" },
-    ]);
-    if (model === undefined) return undefined;
-    return { ...cfg, customAlias, customApiKey: apiKey, customBaseUrl: baseUrl, customModel: model };
-  }
+  if (cfg.backend === "custom") return editCustoms(ctx, cfg);
   const apiKey = await promptSecret(ctx, "Hunyuan / TokenHub API key", cfg.hunyuanApiKey);
   if (apiKey === undefined) return undefined;
   const baseUrl = await pickOrType(ctx, "Hunyuan base URL", cfg.hunyuanBaseUrl, [
@@ -165,19 +150,37 @@ function summarize(cfg: PluginConfig): string {
   const think = cfg.translateThinking ? "thinking" : "no-thinking";
   const chain = [backendLabel(cfg), fallbackLabel(cfg, cfg.fallback1), fallbackLabel(cfg, cfg.fallback2)]
     .filter((s) => s !== "off")
-    .join(">");
+    .join("|");
   return `${on} · ${chain} · ${cfg.target} · ${think}`;
 }
 
+function customNames(cfg: PluginConfig): string {
+  const names = cfg.customs.map((c) => c.alias.trim() || c.model || "custom");
+  return names.length > 0 ? names.join("|") : "custom";
+}
+
 function backendLabel(cfg: PluginConfig): string {
-  if (cfg.backend === "custom") return cfg.customAlias.trim() || "custom";
+  if (cfg.backend === "custom") return customNames(cfg);
   return cfg.backend;
 }
 
 function fallbackLabel(cfg: PluginConfig, slot: FallbackSlot): string {
   if (slot === "off") return "off";
-  if (slot === "custom") return cfg.customAlias.trim() || "custom";
+  if (slot === "custom") return customNames(cfg);
   return slot;
+}
+
+function customsHint(cfg: PluginConfig): string {
+  if (cfg.customs.length === 0) return "none · race fastest";
+  return `${cfg.customs.length} · ${customNames(cfg)}`;
+}
+
+function customLine(c: CustomLlm): string {
+  const alias = c.alias.trim() || "custom";
+  const model = c.model || "no model";
+  const url = c.baseUrl || "no url";
+  const key = c.apiKey ? maskSecret(c.apiKey) : "no key";
+  return `${alias} · ${model} · ${url} · ${key}`;
 }
 
 function providerHint(cfg: PluginConfig): string {
@@ -185,14 +188,66 @@ function providerHint(cfg: PluginConfig): string {
   if (cfg.backend === "deepseek") {
     return `${cfg.deepseekModel}${cfg.deepseekApiKey ? ` · ${maskSecret(cfg.deepseekApiKey)}` : " · no key"}`;
   }
-  if (cfg.backend === "custom") {
-    const alias = cfg.customAlias.trim() || "custom";
-    const model = cfg.customModel || "no model";
-    const url = cfg.customBaseUrl || "no url";
-    const key = cfg.customApiKey ? maskSecret(cfg.customApiKey) : "no key";
-    return `${alias} · ${model} · ${url} · ${key}`;
-  }
+  if (cfg.backend === "custom") return customsHint(cfg);
   return `${cfg.hunyuanModel} · ${cfg.hunyuanBaseUrl}${cfg.hunyuanApiKey ? ` · ${maskSecret(cfg.hunyuanApiKey)}` : " · no key"}`;
+}
+
+async function editCustoms(ctx: ExtensionContext, cfg: PluginConfig): Promise<PluginConfig | undefined> {
+  let customs = cfg.customs.slice();
+  for (;;) {
+    const item = await ctx.ui.select("Custom LLMs · race fastest", [
+      { label: "back", description: customs.length === 0 ? "none" : `${customs.length} racers` },
+      { label: "add", description: "OpenAI-compatible URL + key" },
+      ...customs.map((c, i) => ({
+        label: `edit ${i + 1}`,
+        description: customLine(c),
+      })),
+      ...customs.map((c, i) => ({
+        label: `remove ${i + 1}`,
+        description: c.alias.trim() || c.model || "custom",
+      })),
+    ]);
+    if (item === undefined) return undefined;
+    if (item === "back") return { ...cfg, customs };
+    if (item === "add") {
+      const llm = await editCustomLlm(ctx, { alias: "", apiKey: "", baseUrl: "", model: "" });
+      if (llm) customs = [...customs, llm];
+      continue;
+    }
+    const editMatch = /^edit (\d+)$/.exec(item);
+    if (editMatch) {
+      const i = Number(editMatch[1]) - 1;
+      const current = customs[i];
+      if (!current) continue;
+      const llm = await editCustomLlm(ctx, current);
+      if (llm) customs = customs.map((c, idx) => (idx === i ? llm : c));
+      continue;
+    }
+    const removeMatch = /^remove (\d+)$/.exec(item);
+    if (removeMatch) {
+      const i = Number(removeMatch[1]) - 1;
+      customs = customs.filter((_, idx) => idx !== i);
+    }
+  }
+}
+
+async function editCustomLlm(ctx: ExtensionContext, current: CustomLlm): Promise<CustomLlm | undefined> {
+  const aliasRaw = await ctx.ui.input("Custom alias", current.alias || "e.g. b.ai");
+  if (aliasRaw === undefined) return undefined;
+  const alias = aliasRaw.trim() || current.alias;
+  const apiKey = await promptSecret(ctx, "Custom API key", current.apiKey);
+  if (apiKey === undefined) return undefined;
+  const baseUrl = await pickOrType(ctx, "Custom base URL", current.baseUrl, [
+    { label: "https://api.openai.com/v1", description: "OpenAI" },
+    { label: "https://openrouter.ai/api/v1", description: "OpenRouter" },
+  ]);
+  if (baseUrl === undefined) return undefined;
+  const model = await pickOrType(ctx, "Custom model", current.model, [
+    { label: "gpt-4o-mini", description: "OpenAI cheap" },
+    { label: "gpt-4o", description: "OpenAI" },
+  ]);
+  if (model === undefined) return undefined;
+  return { alias, apiKey, baseUrl, model };
 }
 
 export function maskSecret(value: string): string {
