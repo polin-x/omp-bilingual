@@ -1,6 +1,6 @@
 import { CUSTOM_TYPE, REVIEW_TYPE } from "./types.ts";
 
-const FENCE = /^(?:```|~~~)(.*)$/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 const LATIN = /[A-Za-z]/;
 const KANA = /[\u3040-\u30ff]/;

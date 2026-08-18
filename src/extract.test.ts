@@ -45,6 +45,38 @@ test("splitTranslatableParagraphs keeps English lists with a few CJK quotes", ()
   expect(texts.some((t) => t.includes("Keychain Access Group"))).toBe(true);
 });
 
+test("splitTranslatableParagraphs skips indented and long Markdown fences", () => {
+  const texts = splitTranslatableParagraphs(
+    [
+      "Please run this next.",
+      "",
+      "   ```",
+      "   const secretToken = \"do not translate this\";",
+      "   ```",
+      "",
+      "Then the four-backtick block:",
+      "",
+      "````js",
+      "const secretToken = \"still do not translate\";",
+      "````",
+      "",
+      "And the long tilde fence:",
+      "",
+      "~~~~",
+      "const secretToken = \"tilde fence stays code\";",
+      "~~~~",
+      "",
+      "Done after the fences.",
+    ].join("\n"),
+  );
+  expect(texts).toEqual([
+    "Please run this next.",
+    "Then the four-backtick block:",
+    "And the long tilde fence:",
+    "Done after the fences.",
+  ]);
+});
+
 test("extractSourceParagraphs reads assistant text blocks", () => {
   const out = extractSourceParagraphs({
     role: "assistant",
