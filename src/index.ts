@@ -209,7 +209,6 @@ export default function bilingual(pi: ExtensionAPI): void {
   const postTextCard = (texts: string[], kind: Pair["kind"] = "text") => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
     if (texts.length === 0) return;
-    if (sessionIsIdle && !sessionIsIdle()) return;
     const pairs = pairsFromCache(texts, kind);
     pi.sendMessage(
       {
@@ -341,6 +340,39 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, refresh);
     return view;
   });
+  const harvestExisting = (
+    entries: ReadonlyArray<{ type?: string; message?: { role?: string; content?: unknown; customType?: string } }>,
+  ) => {
+    if (!liveConfig.enabled) return;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      const message = entry?.message;
+      if (entry?.type !== "message" || !message || message.role !== "assistant") continue;
+      const later = entries.slice(i + 1);
+      const alreadyCarded = later.some(
+        (next) => next.type === "message" && next.message && isBilingualContextMessage(next.message),
+      );
+      const sources = extractSourceParagraphs(message);
+      const texts = liveConfig.translateText
+        ? sources.filter((s) => s.kind === "text").map((s) => s.text)
+        : [];
+      const thinking = liveConfig.translateThinking
+        ? sources.filter((s) => s.kind === "thinking").map((s) => s.text)
+        : [];
+      if (!alreadyCarded && texts.length > 0) postTextCard(texts);
+      const paras = [...thinking, ...texts];
+      if (paras.length === 0) return;
+      void translateFresh(paras, () => {
+        paintTextCards(texts);
+        lastThinkingRender?.();
+      }).catch((err) => {
+        pi.logger.error("bilingual existing translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+      return;
+    }
+  };
 
   pi.on("session_start", async (_event, ctx) => {
     await boot;
@@ -348,6 +380,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     cancelTimer = (id) => ctx.clearTimer(id);
     sessionIsIdle = () => ctx.isIdle();
     applyUi(ctx.ui);
+    harvestExisting(ctx.sessionManager.getEntries());
   });
 
   pi.on("before_agent_start", (event) => {
