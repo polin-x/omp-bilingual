@@ -4,6 +4,7 @@ import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractAdvisorParagraphs, extractSourceParagraphs, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, TextCardView, ThinkingTranslationView } from "./render.ts";
+import { bindThinkingRefresh } from "./thinking-refresh.ts";
 import {
   backendChain,
   describeChain,
@@ -323,14 +324,21 @@ export default function bilingual(pi: ExtensionAPI): void {
     const { closed, open } = partitionTranslatableParagraphs(context.text);
     const paras = open ? [...closed, open] : closed;
     if (paras.length === 0) return undefined;
-    lastThinkingRender = () => context.requestRender();
     const view = new ThinkingTranslationView(theme);
+    const refresh = bindThinkingRefresh({
+      view,
+      paras,
+      cachedZh,
+      stampFor,
+      requestRender: () => context.requestRender(),
+    });
+    lastThinkingRender = refresh;
     const zh = paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
     if (zh) view.setZh(zh, stampFor(paras));
     const freshClosed = closed.filter(
       (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
     );
-    if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, lastThinkingRender);
+    if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, refresh);
     return view;
   });
 
