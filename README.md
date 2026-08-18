@@ -76,7 +76,7 @@ omp plugin link /path/to/omp-bilingual
 任意 OpenAI 兼容接口，可配多个。`/bilingual settings` → `customs` 添加/编辑/删除。例如 `https://api.openai.com/v1` + `gpt-4o-mini`，或 OpenRouter / 自建 vLLM。旧的单个 `customApiKey` / `customBaseUrl` / `customModel` 会在加载时迁进列表。
 
 **Race**
-主后端、fallback、以及每一个 custom LLM **并行请求**。谁先返回可用译文就用谁，其余立即 abort。译文末尾带上赢家别名和耗时，例如 ` · b.ai 320ms`。状态栏列出参赛模型，例如 `译:b.ai/deepseek-v4-flash|google|deepseek-v4-flash`。
+`/bilingual settings` → `customs` 里的 LLM **并行竞速**。全部失败后才走 fallback（`>`）。译文末尾：` · b.ai 320ms`。状态栏：`译:b.ai/deepseek-v4-flash|ds-v4-flash/deepseek-v4-flash>google>deepseek-v4-flash`。
 
 不要把 json 里的 key 提交进 git。
 

@@ -24,20 +24,24 @@ export function backendChain(config: PluginConfig): Backend[] {
   return out.length > 0 ? out : [config.backend];
 }
 
-export function resolvedBackends(config: PluginConfig): ResolvedBackend[] {
-  const out: ResolvedBackend[] = [];
+export function resolvedStages(config: PluginConfig): ResolvedBackend[][] {
+  const stages: ResolvedBackend[][] = [];
   for (const kind of backendChain(config)) {
     if (kind !== "custom") {
-      out.push({ kind });
+      stages.push([{ kind }]);
       continue;
     }
     if (config.customs.length === 0) {
-      out.push({ kind: "custom", llm: { alias: "", apiKey: "", baseUrl: "", model: "" } });
+      stages.push([{ kind: "custom", llm: { alias: "", apiKey: "", baseUrl: "", model: "" } }]);
       continue;
     }
-    for (const llm of config.customs) out.push({ kind: "custom", llm });
+    stages.push(config.customs.map((llm) => ({ kind: "custom" as const, llm })));
   }
-  return out;
+  return stages;
+}
+
+export function resolvedBackends(config: PluginConfig): ResolvedBackend[] {
+  return resolvedStages(config).flat();
 }
 
 export async function translateParagraphs(
@@ -46,18 +50,29 @@ export async function translateParagraphs(
   signal?: AbortSignal,
 ): Promise<Pair[]> {
   if (paragraphs.length === 0) return [];
-  const started = Date.now();
-  const { pairs, via } = await firstSuccess(
-    resolvedBackends(config).map((backend) => async (taskSignal) => ({
-      pairs: await translateOnce(paragraphs, config, backend, taskSignal),
-      via:
-        backend.kind === "custom" ? backend.llm.alias.trim() || backend.llm.model || "custom" : backend.kind,
-    })),
-    signal,
-  );
-  const last = pairs[pairs.length - 1];
-  if (!last) return pairs;
-  return [...pairs.slice(0, -1), { ...last, alias: via, delayMs: Math.max(0, Date.now() - started) }];
+  const stages = resolvedStages(config);
+  let last: unknown;
+  for (const stage of stages) {
+    if (signal?.aborted) throw abortError(signal);
+    const started = Date.now();
+    try {
+      const { pairs, via } = await firstSuccess(
+        stage.map((backend) => async (taskSignal) => ({
+          pairs: await translateOnce(paragraphs, config, backend, taskSignal),
+          via:
+            backend.kind === "custom" ? backend.llm.alias.trim() || backend.llm.model || "custom" : backend.kind,
+        })),
+        signal,
+      );
+      const lastPair = pairs[pairs.length - 1];
+      if (!lastPair) throw new Error("empty translation");
+      return [...pairs.slice(0, -1), { ...lastPair, alias: via, delayMs: Math.max(0, Date.now() - started) }];
+    } catch (err) {
+      if (signal?.aborted) throw abortError(signal);
+      last = err;
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last ?? "translation failed"));
 }
 
 async function translateOnce(
@@ -312,17 +327,29 @@ export async function reviewEnglishPrompt(
   config: PluginConfig,
   signal?: AbortSignal,
 ): Promise<EnglishReview | undefined> {
-  const chain = resolvedBackends(config).filter((backend) => backend.kind !== "google");
-  if (chain.length === 0) return undefined;
-  return firstSuccess(
-    chain.map((backend) => async (taskSignal) => {
-      const opts = openAiOpts(config, backend);
-      const review = await reviewOnce(text, opts, taskSignal);
-      if (!review) throw new Error(`${opts.name} returned unusable review`);
-      return review;
-    }),
-    signal,
-  );
+  const stages = resolvedStages(config)
+    .map((stage) => stage.filter((backend) => backend.kind !== "google"))
+    .filter((stage) => stage.length > 0);
+  if (stages.length === 0) return undefined;
+  let last: unknown;
+  for (const stage of stages) {
+    if (signal?.aborted) throw abortError(signal);
+    try {
+      return await firstSuccess(
+        stage.map((backend) => async (taskSignal) => {
+          const opts = openAiOpts(config, backend);
+          const review = await reviewOnce(text, opts, taskSignal);
+          if (!review) throw new Error(`${opts.name} returned unusable review`);
+          return review;
+        }),
+        signal,
+      );
+    } catch (err) {
+      if (signal?.aborted) throw abortError(signal);
+      last = err;
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last ?? "review failed"));
 }
 
 async function reviewOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<EnglishReview | undefined> {
@@ -398,9 +425,9 @@ export function describeBackend(backend: Backend, config?: PluginConfig): string
 }
 
 export function describeChain(config: PluginConfig): string {
-  return resolvedBackends(config)
-    .map((backend) => describeResolved(backend, config))
-    .join("|");
+  return resolvedStages(config)
+    .map((stage) => stage.map((backend) => describeResolved(backend, config)).join("|"))
+    .join(">");
 }
 
 function describeResolved(backend: ResolvedBackend, config: PluginConfig): string {

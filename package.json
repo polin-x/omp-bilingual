@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.48",
+  "version": "0.1.49",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -23,13 +23,13 @@
         "type": "enum",
         "values": ["off", "google", "deepseek", "hunyuan", "custom"],
         "default": "off",
-        "description": "Also raced with the primary backend; first usable response wins"
+        "description": "Tried only after every settings custom LLM fails"
       },
       "fallback2": {
         "type": "enum",
         "values": ["off", "google", "deepseek", "hunyuan", "custom"],
         "default": "off",
-        "description": "Also raced with the primary backend; first usable response wins"
+        "description": "Tried only after fallback1 fails"
       },
       "target": {
         "type": "string",

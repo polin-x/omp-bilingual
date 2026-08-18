@@ -54,6 +54,35 @@ test("resolvedBackends expands each custom LLM", () => {
   expect(describeChain(multi)).toBe("a/m1|b/m2");
 });
 
+test("customs race in place; later fallbacks stay later", () => {
+  const multi: PluginConfig = {
+    ...cfg,
+    fallback1: "google",
+    fallback2: "deepseek",
+    customs: [
+      { alias: "a", apiKey: "k1", baseUrl: "https://a.test/v1", model: "m1" },
+      { alias: "b", apiKey: "k2", baseUrl: "https://b.test/v1", model: "m2" },
+    ],
+  };
+  expect(resolvedBackends(multi).map((b) => b.kind)).toEqual(["custom", "custom", "google", "deepseek"]);
+  expect(describeChain(multi)).toBe("a/m1|b/m2>google>deepseek-model");
+});
+
+test("google primary stays before custom racers", () => {
+  const multi: PluginConfig = {
+    ...cfg,
+    backend: "google",
+    fallback1: "custom",
+    fallback2: "off",
+    customs: [
+      { alias: "a", apiKey: "k1", baseUrl: "https://a.test/v1", model: "m1" },
+      { alias: "b", apiKey: "k2", baseUrl: "https://b.test/v1", model: "m2" },
+    ],
+  };
+  expect(resolvedBackends(multi).map((b) => b.kind)).toEqual(["google", "custom", "custom"]);
+  expect(describeChain(multi)).toBe("google>a/m1|b/m2");
+});
+
 test("fastest custom wins and aborts the slower one", async () => {
   const multi: PluginConfig = {
     ...DEFAULT_CONFIG,
@@ -170,7 +199,7 @@ test("aborted review rejects after every racer has started", async () => {
   }) as typeof fetch;
 
   await expect(reviewEnglishPrompt("hello there friend", cfg, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
-  expect(calls).toBe(2);
+  expect(calls).toBe(1);
 });
 
 test("aborted translate rejects after every racer has started", async () => {
@@ -187,7 +216,34 @@ test("aborted translate rejects after every racer has started", async () => {
   await expect(translateParagraphs(["Need git status first."], cfg, ac.signal)).rejects.toMatchObject({
     name: "AbortError",
   });
-  expect(calls).toBe(2);
+  expect(calls).toBe(1);
+});
+
+test("all customs failing falls through to the next stage", async () => {
+  const multi: PluginConfig = {
+    ...cfg,
+    fallback1: "google",
+    fallback2: "off",
+    customs: [
+      { alias: "a", apiKey: "k1", baseUrl: "https://a.test/v1", model: "m1" },
+      { alias: "b", apiKey: "k2", baseUrl: "https://b.test/v1", model: "m2" },
+    ],
+  };
+  const hosts: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    hosts.push(new URL(url).host);
+    if (url.includes("googleapis.com")) {
+      return new Response(JSON.stringify([[["先检查 git status。", "Need git status first."]]]), { status: 200 });
+    }
+    return new Response("nope", { status: 500 });
+  }) as typeof fetch;
+
+  const pairs = await translateParagraphs(["Need git status first."], multi);
+  expect(pairs[0]?.zh).toBe("先检查 git status。");
+  expect(pairs[0]?.alias).toBe("google");
+  expect(hosts.filter((h) => h.includes("a.test") || h.includes("b.test")).length).toBe(2);
+  expect(hosts.some((h) => h.includes("googleapis.com"))).toBe(true);
 });
 
 test("translationSuffix is display-only", () => {
