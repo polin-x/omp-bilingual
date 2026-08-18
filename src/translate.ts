@@ -50,7 +50,8 @@ export async function translateParagraphs(
   const { pairs, via } = await firstSuccess(
     resolvedBackends(config).map((backend) => async (taskSignal) => ({
       pairs: await translateOnce(paragraphs, config, backend, taskSignal),
-      via: describeResolved(backend, config),
+      via:
+        backend.kind === "custom" ? backend.llm.alias.trim() || backend.llm.model || "custom" : backend.kind,
     })),
     signal,
   );

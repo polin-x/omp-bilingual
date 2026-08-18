@@ -88,10 +88,10 @@ test("fastest custom wins and aborts the slower one", async () => {
   expect(pairs).toHaveLength(1);
   expect(pairs[0]?.en).toBe("Need git status first.");
   expect(pairs[0]?.zh).toBe("先检查 git status。");
-  expect(pairs[0]?.alias).toBe("fast/m2");
+  expect(pairs[0]?.alias).toBe("fast");
   expect(pairs[0]?.delayMs).toBeGreaterThanOrEqual(0);
   expect(`${pairs[0]?.zh}${translationSuffix(pairs[0]?.alias, pairs[0]?.delayMs)}`).toMatch(
-    /^先检查 git status。 · fast\/m2 \d+ms$/,
+    /^先检查 git status。 · fast \d+ms$/,
   );
   expect(slowAborted).toBe(true);
 });
@@ -127,7 +127,7 @@ test("delayMs is the winner latency, not the slower sibling", async () => {
     }) as typeof fetch;
 
     const pairs = await translateParagraphs(["Need git status first."], multi);
-    expect(pairs[0]?.alias).toBe("fast/m2");
+    expect(pairs[0]?.alias).toBe("fast");
     expect(pairs[0]?.delayMs).toBe(40);
   } finally {
     Date.now = realNow;
