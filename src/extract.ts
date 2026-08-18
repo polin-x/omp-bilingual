@@ -1,4 +1,6 @@
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+import { CUSTOM_TYPE, REVIEW_TYPE } from "./types.ts";
+
+const FENCE = /^(?:```|~~~)(.*)$/;
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
 const LATIN = /[A-Za-z]/;
 const KANA = /[\u3040-\u30ff]/;
@@ -29,6 +31,7 @@ export function extractSourceParagraphs(message: { role?: string; content?: unkn
 
 export type SessionLikeEntry = {
   type?: string;
+  customType?: string;
   message?: { role?: string; content?: unknown; customType?: string };
 };
 
@@ -45,10 +48,21 @@ export function findLastTranslatableAssistant(
     const thinking = sources.filter((s) => s.kind === "thinking").map((s) => s.text);
     if (texts.length === 0) continue;
     const later = entries.slice(i + 1);
-    const alreadyCarded = later.some((next) => next.type === "message" && next.message && isCard(next.message));
+    const alreadyCarded = later.some((next) => isPersistedCard(next, isCard));
     return { texts, thinking, alreadyCarded };
   }
   return undefined;
+}
+
+function isPersistedCard(
+  entry: SessionLikeEntry,
+  isCard: (message: { role?: string; customType?: string }) => boolean,
+): boolean {
+  if (entry.type === "custom_message") {
+    const t = entry.customType ?? "";
+    return t === CUSTOM_TYPE || t === REVIEW_TYPE || t.startsWith("com.omp.bilingual");
+  }
+  return entry.type === "message" && !!entry.message && isCard(entry.message);
 }
 
 export function extractAdvisorParagraphs(message: {

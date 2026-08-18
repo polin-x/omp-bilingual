@@ -93,3 +93,18 @@ test("findLastTranslatableAssistant skips later Chinese text with English thinki
   expect(hit?.texts).toEqual(["Implemented and pushed."]);
   expect(hit?.thinking).toEqual([]);
 });
+
+test("findLastTranslatableAssistant treats persisted custom_message as already carded", () => {
+  const hit = findLastTranslatableAssistant(
+    [
+      {
+        type: "message",
+        message: { role: "assistant", content: [{ type: "text", text: "Implemented and pushed." }] },
+      },
+      { type: "custom_message", customType: "com.omp.bilingual" },
+    ],
+    (m) => m.role === "custom" && m.customType === "com.omp.bilingual",
+  );
+  expect(hit?.texts).toEqual(["Implemented and pushed."]);
+  expect(hit?.alreadyCarded).toBe(true);
+});
