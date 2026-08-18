@@ -173,15 +173,11 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
-  const paintThinking = () => {
-    lastThinkingRender?.();
-  };
 
   const translateFresh = async (paras: string[], requestRender?: () => void): Promise<Pair[]> => {
     const fresh = paras.filter((p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)));
     if (fresh.length === 0) {
       requestRender?.();
-      paintThinking();
       return [];
     }
     for (const p of fresh) paraBusy.add(keyOf(p));
@@ -198,7 +194,6 @@ export default function bilingual(pi: ExtensionAPI): void {
           out.push(pair);
         }
       }
-      paintThinking();
       requestRender?.();
       return out;
     } catch (err) {
