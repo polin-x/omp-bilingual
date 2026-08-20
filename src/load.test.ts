@@ -6,6 +6,7 @@ const REQUIRED = [
   "reviewKeyOf",
   "paintReviews",
   "postTextCard",
+  "whenIdle",
   "paintTextCards",
   "pairsFromCache",
   "runEnglishReview",
@@ -32,4 +33,15 @@ test("before_agent_start dispatches Chinese prompts before English review", asyn
   const english = src.indexOf("isEnglishPrompt(text)");
   expect(chinese).toBeGreaterThan(-1);
   expect(english).toBeGreaterThan(chinese);
+});
+
+test("postTextCard waits for idle before nextTurn send", async () => {
+  const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+  const when = src.indexOf("const whenIdle");
+  const post = src.indexOf("const postTextCard");
+  const send = src.indexOf('deliverAs: "nextTurn"');
+  expect(when).toBeGreaterThan(-1);
+  expect(post).toBeGreaterThan(when);
+  expect(send).toBeGreaterThan(post);
+  expect(src.slice(post, send)).toContain("whenIdle");
 });

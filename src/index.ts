@@ -121,6 +121,8 @@ export default function bilingual(pi: ExtensionAPI): void {
   let cancelTimer: ((id: unknown) => void) | undefined;
   let sessionIsIdle: (() => boolean) | undefined;
   let thinkingTimer: unknown;
+  let idlePostTimers = new Set<unknown>();
+  let cardEpoch = 0;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let lastThinkingRender: (() => void) | undefined;
   let persistTimer: unknown;
@@ -235,27 +237,58 @@ export default function bilingual(pi: ExtensionAPI): void {
       for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
+  const whenIdle = (fn: () => void) => {
+    const epoch = cardEpoch;
+    const run = () => {
+      if (epoch !== cardEpoch) return;
+      fn();
+    };
+    if (!sessionIsIdle || sessionIsIdle()) {
+      run();
+      return;
+    }
+    if (!scheduleTimer) {
+      run();
+      return;
+    }
+    let id: unknown;
+    const tick = () => {
+      idlePostTimers.delete(id);
+      if (epoch !== cardEpoch) return;
+      if (!sessionIsIdle || sessionIsIdle()) {
+        run();
+        return;
+      }
+      id = scheduleTimer?.(tick, 32);
+      idlePostTimers.add(id);
+    };
+    id = scheduleTimer(tick, 32);
+    idlePostTimers.add(id);
+  };
+
   const postTextCard = (texts: string[], kind: Pair["kind"] = "text") => {
     if (!liveConfig.enabled || !liveConfig.translateText) return;
     if (texts.length === 0) return;
-    const pairs = pairsFromCache(texts, kind);
-    pi.sendMessage(
-      {
-        customType: CUSTOM_TYPE,
-        content: "",
-        display: true,
-        attribution: "agent",
-        details: {
-          texts,
-          pairs,
-          kind,
-          backend: liveConfig.backend,
-          chain: describeChain(liveConfig),
-          ornament: liveConfig.ornament,
+    whenIdle(() => {
+      const pairs = pairsFromCache(texts, kind);
+      pi.sendMessage(
+        {
+          customType: CUSTOM_TYPE,
+          content: "",
+          display: true,
+          attribution: "agent",
+          details: {
+            texts,
+            pairs,
+            kind,
+            backend: liveConfig.backend,
+            chain: describeChain(liveConfig),
+            ornament: liveConfig.ornament,
+          },
         },
-      },
-      { triggerTurn: false, deliverAs: "nextTurn" },
-    );
+        { triggerTurn: false, deliverAs: "nextTurn" },
+      );
+    });
   };
 
   const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
@@ -469,6 +502,9 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_start", () => {
+    cardEpoch += 1;
+    for (const id of idlePostTimers) cancelTimer?.(id);
+    idlePostTimers.clear();
     ui?.setWidget("bilingual", undefined);
   });
 
