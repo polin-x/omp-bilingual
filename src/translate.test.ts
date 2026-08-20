@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { backendChain, coachChinesePrompt, describeChain, resolvedBackends, reviewEnglishPrompt, translateParagraphs } from "./translate.ts";
+import { backendChain, coachChinesePrompt, describeChain, resolvedBackends, reviewEnglishPrompt, reusableCachedCoach, serializeCoachCache, translateParagraphs } from "./translate.ts";
 import { DEFAULT_CONFIG, translationSuffix, type PluginConfig } from "./types.ts";
 
 const cfg: PluginConfig = {
@@ -218,11 +218,83 @@ test("coachChinesePrompt uses Google when no LLM is configured", async () => {
       status: 200,
     });
   }) as typeof fetch;
-
   const coach = await coachChinesePrompt("能不能也把提问译成英文？", DEFAULT_CONFIG);
   expect(coach?.english).toBe("Can we also translate Chinese questions?");
   expect(coach?.better).toBe("");
   expect(coach?.note).toContain("对照译文");
+  expect(coach?.provider).toBe("google");
+});
+
+test("google fallback coach shows LLM failure reason", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("translate.googleapis.com")) {
+      return new Response(JSON.stringify([[["Can we also translate Chinese questions?", "能不能也把提问译成英文"]]]), {
+        status: 200,
+      });
+    }
+    return jsonResponse("not-json");
+  }) as typeof fetch;
+
+  const coach = await coachChinesePrompt("能不能也把提问译成英文？", {
+    ...cfg,
+    fallback1: "google",
+    fallback2: "off",
+  });
+  expect(coach?.english).toBe("Can we also translate Chinese questions?");
+  expect(coach?.note).toContain("failed:");
+  expect(coach?.note).toContain("not JSON");
+  expect(coach?.provider).toBe("google");
+});
+
+test("coach reports empty content with backend name on Google fallback", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("translate.googleapis.com")) {
+      return new Response(JSON.stringify([[["Hi", "你好"]]]), { status: 200 });
+    }
+    return jsonResponse("");
+  }) as typeof fetch;
+
+  const coach = await coachChinesePrompt("能不能也把提问译成英文？", {
+    ...cfg,
+    fallback1: "google",
+    fallback2: "off",
+  });
+  expect(coach?.provider).toBe("google");
+  expect(coach?.note).toContain("failed: empty content");
+});
+
+test("google coach is not cached so a later LLM result can upgrade the same prompt", () => {
+  const google = {
+    english: "I also want you to support something",
+    better: "",
+    note: "对照译文。custom failed: not JSON",
+    provider: "google" as const,
+  };
+  expect(serializeCoachCache(google)).toBeUndefined();
+  expect(reusableCachedCoach(JSON.stringify(google))).toBeUndefined();
+  const llm = {
+    english: "Also add a right-side signal on the board after each market close.",
+    better: "Add a right-side signal after market close.",
+    note: "also 放在动词前。谐音 all so：全都算上。",
+    provider: "llm" as const,
+  };
+  const stored = serializeCoachCache(llm);
+  expect(stored).toBeTruthy();
+  expect(reusableCachedCoach(stored ?? "")?.note).toContain("谐音");
+});
+
+test("legacy 对照译文 cache is not reused", () => {
+  expect(
+    reusableCachedCoach(
+      JSON.stringify({
+        english: "Hi",
+        better: "",
+        note: "对照译文。配 DeepSeek / 混元 / custom 可看记忆技巧。",
+      }),
+    ),
+  ).toBeUndefined();
 });
 
 test("custom-only coach failure never calls Google", async () => {
@@ -239,7 +311,7 @@ test("custom-only coach failure never calls Google", async () => {
       fallback1: "off",
       fallback2: "off",
     }),
-  ).rejects.toThrow(/unusable coach|not-json|learn failed/);
+  ).rejects.toThrow(/failed: not JSON|learn failed/);
   expect(hosts).toEqual(["custom.test"]);
 });
 

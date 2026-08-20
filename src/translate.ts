@@ -12,7 +12,30 @@ export type PromptCoach = {
   english: string;
   better: string;
   note: string;
+  provider: "google" | "llm";
 };
+
+export function reusableCachedCoach(raw: string): PromptCoach | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    if (!("english" in parsed) || !("note" in parsed)) return undefined;
+    const english = typeof parsed.english === "string" ? parsed.english : "";
+    if (!english) return undefined;
+    const better = "better" in parsed && typeof parsed.better === "string" ? parsed.better : "";
+    const note = typeof parsed.note === "string" ? parsed.note : "";
+    if ("provider" in parsed && parsed.provider === "google") return undefined;
+    if (!("provider" in parsed) && note.startsWith("对照译文")) return undefined;
+    return { english, better, note, provider: "llm" };
+  } catch {
+    return undefined;
+  }
+}
+
+export function serializeCoachCache(coach: PromptCoach): string | undefined {
+  if (coach.provider === "google") return undefined;
+  return JSON.stringify(coach);
+}
 const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 
 export type ResolvedBackend =
@@ -366,6 +389,7 @@ export async function coachChinesePrompt(
   const stages = resolvedStages(config)
     .map((stage) => stage.filter((backend) => backend.kind !== "google"))
     .filter((stage) => stage.length > 0);
+  const failures: string[] = [];
   let last: unknown;
   for (const stage of stages) {
     if (signal?.aborted) throw abortError(signal);
@@ -373,24 +397,27 @@ export async function coachChinesePrompt(
       return await firstSuccess(
         stage.map((backend) => async (taskSignal) => {
           const opts = openAiOpts(config, backend);
-          const coach = await coachOnce(text, opts, taskSignal);
-          if (!coach) throw new Error(`${opts.name} returned unusable coach`);
-          return coach;
+          return coachOnce(text, opts, taskSignal);
         }),
         signal,
       );
     } catch (err) {
       if (signal?.aborted) throw abortError(signal);
       last = err;
+      failures.push(err instanceof Error ? err.message : String(err));
     }
   }
   if (backendChain(config).includes("google")) {
     try {
       const english = await translateGoogleToEnglish(text, signal);
+      const why = failures.join("; ").trim();
       return {
         english,
         better: "",
-        note: "对照译文。配 DeepSeek / 混元 / custom 可看记忆技巧。",
+        note: why
+          ? `对照译文。${why.slice(0, 400)}`
+          : "对照译文。配 DeepSeek / 混元 / custom 可看记忆技巧。",
+        provider: "google",
       };
     } catch (err) {
       if (signal?.aborted) throw abortError(signal);
@@ -400,10 +427,10 @@ export async function coachChinesePrompt(
   throw last instanceof Error ? last : new Error(String(last ?? "learn failed"));
 }
 
-async function coachOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<PromptCoach | undefined> {
-  if (!opts.apiKey) throw new Error(`${opts.name} API key missing`);
-  if (!opts.baseUrl) throw new Error(`${opts.name} base URL missing`);
-  if (!opts.model) throw new Error(`${opts.name} model missing`);
+async function coachOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<PromptCoach> {
+  if (!opts.apiKey) throw new Error(`${opts.name} failed: API key missing`);
+  if (!opts.baseUrl) throw new Error(`${opts.name} failed: base URL missing`);
+  if (!opts.model) throw new Error(`${opts.name} failed: model missing`);
   const res = await fetch(joinUrl(opts.baseUrl, "chat/completions"), {
     method: "POST",
     signal,
@@ -432,27 +459,34 @@ async function coachOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): 
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`${opts.name} HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`${opts.name} failed: HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
   }
-  const payload = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return parsePromptCoach(payload.choices?.[0]?.message?.content ?? "", text);
+  const payload = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+  const content = payload.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) throw new Error(`${opts.name} failed: empty content`);
+  const parsed = parsePromptCoach(content, text);
+  if ("reason" in parsed) throw new Error(`${opts.name} failed: ${parsed.reason}`);
+  return parsed.coach;
 }
 
-function parsePromptCoach(raw: string, source: string): PromptCoach | undefined {
+function parsePromptCoach(raw: string, source: string): { coach: PromptCoach } | { reason: string } {
   const stripped = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!stripped) return { reason: "empty content" };
   const start = stripped.indexOf("{");
   const end = stripped.lastIndexOf("}");
   const slice = start >= 0 && end > start ? stripped.slice(start, end + 1) : stripped;
   const parsed = tryJson(slice);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-  if (!("english" in parsed) || !("note" in parsed)) return undefined;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { reason: "not JSON" };
+  if (!("english" in parsed) || !("note" in parsed)) return { reason: "missing english/note" };
   const english = typeof parsed.english === "string" ? parsed.english.trim() : "";
   const better = "better" in parsed && typeof parsed.better === "string" ? parsed.better.trim() : "";
   const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
-  if (!english) return undefined;
-  if (note.length > 500 || english.length > Math.max(80, source.length * 3)) return undefined;
-  if (better.length > 280) return undefined;
-  return { english, better, note };
+  if (!english) return { reason: "empty english" };
+  const maxEn = Math.max(80, source.length * 3);
+  if (note.length > 500) return { reason: `note too long (${note.length}>500)` };
+  if (english.length > maxEn) return { reason: `english too long (${english.length}>${maxEn})` };
+  if (better.length > 280) return { reason: `better too long (${better.length}>280)` };
+  return { coach: { english, better, note, provider: "llm" } };
 }
 
 async function translateGoogleToEnglish(text: string, signal?: AbortSignal): Promise<string> {
@@ -587,8 +621,8 @@ async function firstSuccess<T>(
   } catch (err) {
     if (signal?.aborted) throw abortError(signal);
     if (err instanceof AggregateError) {
-      const last = err.errors[err.errors.length - 1];
-      throw last instanceof Error ? last : new Error(String(last ?? "translation failed"));
+      const msgs = err.errors.map((e) => (e instanceof Error ? e.message : String(e))).filter(Boolean);
+      throw new Error(msgs.join("; ") || "translation failed");
     }
     throw err;
   } finally {

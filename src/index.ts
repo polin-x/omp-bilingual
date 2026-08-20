@@ -11,6 +11,8 @@ import {
   describeChain,
   looksLikeTranslation,
   reviewEnglishPrompt,
+  reusableCachedCoach,
+  serializeCoachCache,
   translateParagraphs,
   type EnglishReview,
   type PromptCoach,
@@ -91,7 +93,7 @@ export default function bilingual(pi: ExtensionAPI): void {
       "coach" in details && details.coach && typeof details.coach === "object"
         ? (details.coach as PromptCoach)
         : undefined;
-    const cached = parseCachedCoach(paraZh.get(learnKeyOf(details.source)) ?? "");
+    const cached = reusableCachedCoach(paraZh.get(learnKeyOf(details.source)) ?? "");
     const hit = coaches.get(details.source) ?? fromDetails ?? cached;
     if (hit) view.setCoach(hit);
     coachViews.push(view);
@@ -321,7 +323,7 @@ export default function bilingual(pi: ExtensionAPI): void {
   };
 
   const learnCard = (text: string) => {
-    const cached = parseCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
+    const cached = reusableCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
     if (cached) paintCoaches(text, cached);
     return {
       customType: LEARN_TYPE,
@@ -337,7 +339,7 @@ export default function bilingual(pi: ExtensionAPI): void {
     const cacheKey = learnKeyOf(text);
     const cached = paraZh.get(cacheKey);
     if (cached) {
-      const coach = parseCachedCoach(cached);
+      const coach = reusableCachedCoach(cached);
       if (coach) {
         paintCoaches(text, coach);
         return;
@@ -347,12 +349,15 @@ export default function bilingual(pi: ExtensionAPI): void {
     try {
       const coach = await coachChinesePrompt(text, liveConfig);
       if (!coach) return;
-      paraZh.set(cacheKey, JSON.stringify(coach));
-      void saveTranslationCache(paraZh, stamps).catch((err) => {
-        pi.logger.error("bilingual cache save failed", {
-          err: err instanceof Error ? err.message : String(err),
+      const stored = serializeCoachCache(coach);
+      if (stored) {
+        paraZh.set(cacheKey, stored);
+        void saveTranslationCache(paraZh, stamps).catch((err) => {
+          pi.logger.error("bilingual cache save failed", {
+            err: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
+      }
       paintCoaches(text, coach);
     } catch (err) {
       pi.logger.error("bilingual chinese prompt coach failed", {
@@ -676,19 +681,4 @@ function parseCachedReview(raw: string): EnglishReview | undefined {
   }
 }
 
-function parseCachedCoach(raw: string): PromptCoach | undefined {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    if (!("english" in parsed) || !("note" in parsed)) return undefined;
-    const english = typeof parsed.english === "string" ? parsed.english : "";
-    if (!english) return undefined;
-    return {
-      english,
-      better: "better" in parsed && typeof parsed.better === "string" ? parsed.better : "",
-      note: typeof parsed.note === "string" ? parsed.note : "",
-    };
-  } catch {
-    return undefined;
-  }
-}
+
