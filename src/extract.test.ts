@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, splitTranslatableParagraphs } from "./extract.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, splitTranslatableParagraphs } from "./extract.ts";
 
 test("extractAdvisorParagraphs pulls English notes only", () => {
   const texts = extractAdvisorParagraphs({
@@ -22,6 +22,19 @@ test("extractAdvisorParagraphs pulls English notes only", () => {
 
 test("extractAdvisorParagraphs ignores non-advisor messages", () => {
   expect(extractAdvisorParagraphs({ role: "assistant", customType: "advisor", details: { notes: [] } })).toEqual([]);
+});
+
+test("isChinesePrompt accepts Chinese-dominant questions", () => {
+  expect(isChinesePrompt("能不能也把提问译成英文，并加上记忆技巧？")).toBe(true);
+  expect(isChinesePrompt("帮我看下这个插件。")).toBe(true);
+  expect(isChinesePrompt("这个 bug 怎么修")).toBe(true);
+});
+
+test("isChinesePrompt rejects English, slash commands, and short replies", () => {
+  expect(isChinesePrompt("Can we also translate Chinese questions?")).toBe(false);
+  expect(isChinesePrompt("/bilingual status")).toBe(false);
+  expect(isChinesePrompt("好的")).toBe(false);
+  expect(isChinesePrompt("fix this bug please")).toBe(false);
 });
 
 test("splitTranslatableParagraphs keeps English lists with a few CJK quotes", () => {

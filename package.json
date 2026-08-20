@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.58",
+  "version": "0.1.59",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",
@@ -55,6 +55,11 @@
         "type": "boolean",
         "default": true,
         "description": "Check grammar of English user prompts after send"
+      },
+      "learnEnglish": {
+        "type": "boolean",
+        "default": true,
+        "description": "Translate Chinese prompts to English and add memory tips"
       },
       "ornament": {
         "type": "string",

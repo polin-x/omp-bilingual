@@ -12,8 +12,9 @@ Oh My Pi 插件：把模型回复里的**英文段落**译成中英对照，原�
 |---|---|
 | thinking 斜体框 | 回合结束后补一行中文。只画在 TUI，不写 session |
 | 终局英文回复 | 编辑器上方一张对照卡（widget）。不 `sendMessage` |
+| 中文提问 | 发完后一张学习卡：英文说法 + 记忆技巧。不进主模型 |
 | 不译 | 代码块、`$` 命令、路径、GFM 表格、标题、已是中文的段落 |
-| 不进主模型 | 不写 custom 消息，不注册 `context` 钩子，不 `steer` |
+| 不进主模型 | 不写 custom 消息进 context，不 `steer` |
 
 行内 `` `code` ``、`**粗体**` 先占位再译，译完还原。
 
@@ -58,6 +59,8 @@ omp plugin link /path/to/omp-bilingual
 ```
 
 `/bilingual configure` 用 TUI 选开关、后端、密钥、模型、混元 Base URL。密钥和模型写到 `~/.omp/agent/omp-bilingual.json`，**不读环境变量**。
+
+`settings` 里的 **learn**（默认开）：中文提问发出后，出一张学习卡。有 LLM 时给自然英文、可直接再用的短 prompt，以及谐音/拆词/场景记忆；只有 Google 时先给对照译文。不进主模型。**review** 继续只改英文提问。
 
 已有密钥时，密钥输入框留空表示保持不变。模型可选预设或 `custom` 手输。
 

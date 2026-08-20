@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { backendChain, describeChain, resolvedBackends, reviewEnglishPrompt, translateParagraphs } from "./translate.ts";
+import { backendChain, coachChinesePrompt, describeChain, resolvedBackends, reviewEnglishPrompt, translateParagraphs } from "./translate.ts";
 import { DEFAULT_CONFIG, translationSuffix, type PluginConfig } from "./types.ts";
 
 const cfg: PluginConfig = {
@@ -185,6 +185,44 @@ test("bad JSON review still succeeds from a sibling LLM", async () => {
   expect(review?.ok).toBe(true);
   expect(review?.corrected).toBe("Hello there, friend.");
   expect(hosts.sort()).toEqual(["api.deepseek.com", "custom.test"]);
+});
+
+test("fastest coach wins and falls back to Google when LLMs fail", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("custom.test")) {
+      return jsonResponse("not-json");
+    }
+    if (url.includes("api.deepseek.com")) {
+      return jsonResponse(
+        JSON.stringify({
+          english: "Can we also translate Chinese questions into English?",
+          better: "Also show English for Chinese prompts.",
+          note: "also 放在动词前。谐音 all so：全都算上。",
+        }),
+      );
+    }
+    throw new Error(`unexpected ${url}`);
+  }) as typeof fetch;
+
+  const coach = await coachChinesePrompt("能不能也把提问译成英文？", cfg);
+  expect(coach?.english).toBe("Can we also translate Chinese questions into English?");
+  expect(coach?.note).toContain("谐音");
+});
+
+test("coachChinesePrompt uses Google when no LLM is configured", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (!url.includes("translate.googleapis.com")) throw new Error(`unexpected ${url}`);
+    return new Response(JSON.stringify([[["Can we also translate Chinese questions?", "能不能也把提问译成英文"]]]), {
+      status: 200,
+    });
+  }) as typeof fetch;
+
+  const coach = await coachChinesePrompt("能不能也把提问译成英文？", DEFAULT_CONFIG);
+  expect(coach?.english).toBe("Can we also translate Chinese questions?");
+  expect(coach?.better).toBe("");
+  expect(coach?.note).toContain("对照译文");
 });
 
 test("aborted review rejects after every racer has started", async () => {

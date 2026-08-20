@@ -19,6 +19,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
       { label: "text", description: cfg.translateText ? "card under reply" : "off" },
       { label: "review", description: cfg.reviewEnglish ? "check English prompts" : "off" },
+      { label: "learn", description: cfg.learnEnglish ? "Chinese prompts → English + memory tips" : "off" },
       { label: "provider", description: providerHint(cfg) },
       { label: "customs", description: customsHint(cfg) },
       { label: "more", description: `source ${cfg.sourceLang}` },
@@ -91,6 +92,14 @@ async function editItem(
     ]);
     if (v === undefined) return undefined;
     return { ...cfg, reviewEnglish: v === "on" };
+  }
+  if (item === "learn") {
+    const v = await ctx.ui.select("Learn English from Chinese prompts", [
+      { label: "on", description: "Show English + memory tips after a Chinese question" },
+      { label: "off", description: "Do not coach Chinese prompts" },
+    ]);
+    if (v === undefined) return undefined;
+    return { ...cfg, learnEnglish: v === "on" };
   }
   if (item === "provider") return editProvider(ctx, cfg);
   if (item === "customs") return editCustoms(ctx, cfg);

@@ -99,6 +99,8 @@ export function configFromObject(merged: Record<string, unknown>): PluginConfig 
       typeof merged.translateText === "boolean" ? merged.translateText : DEFAULT_CONFIG.translateText,
     reviewEnglish:
       typeof merged.reviewEnglish === "boolean" ? merged.reviewEnglish : DEFAULT_CONFIG.reviewEnglish,
+    learnEnglish:
+      typeof merged.learnEnglish === "boolean" ? merged.learnEnglish : DEFAULT_CONFIG.learnEnglish,
     ornament: asString(merged.ornament, DEFAULT_CONFIG.ornament),
     ornamentGif: asString(merged.ornamentGif, DEFAULT_CONFIG.ornamentGif),
     thinkingDebounceMs: asDebounceMs(merged.thinkingDebounceMs),

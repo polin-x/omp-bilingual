@@ -2,20 +2,23 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
-import { EnglishReviewView, TextCardView, ThinkingTranslationView } from "./render.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
+import { EnglishReviewView, PromptCoachView, TextCardView, ThinkingTranslationView } from "./render.ts";
 import { bindThinkingRefresh } from "./thinking-refresh.ts";
 import {
   backendChain,
+  coachChinesePrompt,
   describeChain,
   looksLikeTranslation,
   reviewEnglishPrompt,
   translateParagraphs,
   type EnglishReview,
+  type PromptCoach,
 } from "./translate.ts";
 import {
   CUSTOM_TYPE,
   DEFAULT_CONFIG,
+  LEARN_TYPE,
   PACKAGE_VERSION,
   REVIEW_TYPE,
   type Backend,
@@ -35,6 +38,10 @@ export default function bilingual(pi: ExtensionAPI): void {
   const reviewViews: EnglishReviewView[] = [];
   const reviewViewSource = new WeakMap<EnglishReviewView, string>();
   const reviewBusy = new Set<string>();
+  const coaches = new Map<string, PromptCoach>();
+  const coachViews: PromptCoachView[] = [];
+  const coachViewSource = new WeakMap<PromptCoachView, string>();
+  const coachBusy = new Set<string>();
   const textViews: TextCardView[] = [];
   const textViewSource = new WeakMap<TextCardView, string>();
 
@@ -73,6 +80,26 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (reviewViews.length > 16) reviewViews.shift();
     return view;
   });
+  pi.registerMessageRenderer(LEARN_TYPE, (message, _opts, theme) => {
+    if (message.customType !== LEARN_TYPE) return undefined;
+    const details = message.details;
+    if (!details || typeof details !== "object" || !("source" in details) || typeof details.source !== "string") {
+      return undefined;
+    }
+    const view = new PromptCoachView(theme);
+    const fromDetails =
+      "coach" in details && details.coach && typeof details.coach === "object"
+        ? (details.coach as PromptCoach)
+        : undefined;
+    const cached = parseCachedCoach(paraZh.get(learnKeyOf(details.source)) ?? "");
+    const hit = coaches.get(details.source) ?? fromDetails ?? cached;
+    if (hit) view.setCoach(hit);
+    coachViews.push(view);
+    coachViewSource.set(view, details.source);
+    if (coachViews.length > 16) coachViews.shift();
+    return view;
+  });
+
 
   pi.on("context", (event) => ({
     messages: event.messages.filter((m) => !isBilingualContextMessage(m)),
@@ -283,6 +310,59 @@ export default function bilingual(pi: ExtensionAPI): void {
     }
   };
 
+  const learnKeyOf = (zh: string) => `learn\t${liveConfig.backend}\t${zh}`;
+
+  const paintCoaches = (source: string, coach: PromptCoach) => {
+    coaches.set(source, coach);
+    for (const view of coachViews) {
+      if (coachViewSource.get(view) === source) view.setCoach(coach);
+    }
+    ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
+
+  const learnCard = (text: string) => {
+    const cached = parseCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
+    if (cached) paintCoaches(text, cached);
+    return {
+      customType: LEARN_TYPE,
+      content: "",
+      display: true as const,
+      attribution: "agent" as const,
+      details: { source: text, coach: cached },
+    };
+  };
+
+  const runPromptCoach = async (text: string) => {
+    if (coachBusy.has(text)) return;
+    const cacheKey = learnKeyOf(text);
+    const cached = paraZh.get(cacheKey);
+    if (cached) {
+      const coach = parseCachedCoach(cached);
+      if (coach) {
+        paintCoaches(text, coach);
+        return;
+      }
+    }
+    coachBusy.add(text);
+    try {
+      const coach = await coachChinesePrompt(text, liveConfig);
+      if (!coach) return;
+      paraZh.set(cacheKey, JSON.stringify(coach));
+      void saveTranslationCache(paraZh, stamps).catch((err) => {
+        pi.logger.error("bilingual cache save failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+      paintCoaches(text, coach);
+    } catch (err) {
+      pi.logger.error("bilingual chinese prompt coach failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      coachBusy.delete(text);
+    }
+  };
+
   const applyUi = (next: ExtensionUIContext) => {
     ui = next;
     pi.setLabel(pluginLabel(liveConfig));
@@ -371,12 +451,16 @@ export default function bilingual(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", (event) => {
-    if (!liveConfig.enabled || !liveConfig.reviewEnglish) return;
-    if (!backendChain(liveConfig).some((b) => b !== "google")) return;
+    if (!liveConfig.enabled) return;
     const text = event.prompt.trim();
-    if (!isEnglishPrompt(text)) return;
-    void runEnglishReview(text);
-    return { message: reviewCard(text) };
+    if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
+      void runEnglishReview(text);
+      return { message: reviewCard(text) };
+    }
+    if (liveConfig.learnEnglish && isChinesePrompt(text)) {
+      void runPromptCoach(text);
+      return { message: learnCard(text) };
+    }
   });
 
   pi.on("agent_start", () => {
@@ -584,6 +668,23 @@ function parseCachedReview(raw: string): EnglishReview | undefined {
     return {
       ok: parsed.ok === true,
       corrected: typeof parsed.corrected === "string" ? parsed.corrected : "",
+      better: "better" in parsed && typeof parsed.better === "string" ? parsed.better : "",
+      note: typeof parsed.note === "string" ? parsed.note : "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCachedCoach(raw: string): PromptCoach | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    if (!("english" in parsed) || !("note" in parsed)) return undefined;
+    const english = typeof parsed.english === "string" ? parsed.english : "";
+    if (!english) return undefined;
+    return {
+      english,
       better: "better" in parsed && typeof parsed.better === "string" ? parsed.better : "",
       note: typeof parsed.note === "string" ? parsed.note : "",
     };

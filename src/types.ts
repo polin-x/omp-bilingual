@@ -1,9 +1,14 @@
 export const CUSTOM_TYPE = "com.omp.bilingual";
 export const REVIEW_TYPE = "com.omp.bilingual.review";
+export const LEARN_TYPE = "com.omp.bilingual.learn";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.58";
+export const PACKAGE_VERSION = "0.1.59";
 
 export type ReviewDetails = {
+  source: string;
+};
+
+export type LearnDetails = {
   source: string;
 };
 
@@ -49,6 +54,7 @@ export type PluginConfig = {
   translateThinking: boolean;
   translateText: boolean;
   reviewEnglish: boolean;
+  learnEnglish: boolean;
   ornament: string;
   ornamentGif: string;
   thinkingDebounceMs: number;
@@ -119,6 +125,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   translateThinking: true,
   translateText: true,
   reviewEnglish: true,
+  learnEnglish: true,
   ornament: "globe",
   ornamentGif: "",
   thinkingDebounceMs: 2000,

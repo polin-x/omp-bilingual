@@ -153,6 +153,14 @@ export function isEnglishPrompt(text: string): boolean {
   return letters >= 6 && letters > cjk * 2;
 }
 
+export function isChinesePrompt(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 2 || t.startsWith("/")) return false;
+  const letters = t.match(/[A-Za-z]/g)?.length ?? 0;
+  const cjk = t.match(/[\u3400-\u9fff]/g)?.length ?? 0;
+  return cjk >= 4 && cjk >= letters;
+}
+
 function isStructuralMarkdownLine(raw: string): boolean {
   const line = raw.trim();
   if (line.length === 0) return false;

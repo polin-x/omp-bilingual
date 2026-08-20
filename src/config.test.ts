@@ -25,3 +25,8 @@ test("prefers customs array over legacy fields", () => {
   });
   expect(cfg.customs.map((c) => c.alias)).toEqual(["a", "b"]);
 });
+
+test("learnEnglish defaults on and can be turned off", () => {
+  expect(configFromObject({}).learnEnglish).toBe(true);
+  expect(configFromObject({ learnEnglish: false }).learnEnglish).toBe(false);
+});

@@ -9,6 +9,7 @@ const REQUIRED = [
   "paintTextCards",
   "pairsFromCache",
   "runEnglishReview",
+  "runPromptCoach",
 ];
 
 const ORDERED = ["flushThinkingTranslate", "paintReviews"];

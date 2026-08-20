@@ -7,6 +7,12 @@ export type EnglishReview = {
   better: string;
   note: string;
 };
+
+export type PromptCoach = {
+  english: string;
+  better: string;
+  note: string;
+};
 const GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 
 export type ResolvedBackend =
@@ -350,6 +356,117 @@ export async function reviewEnglishPrompt(
     }
   }
   throw last instanceof Error ? last : new Error(String(last ?? "review failed"));
+}
+
+export async function coachChinesePrompt(
+  text: string,
+  config: PluginConfig,
+  signal?: AbortSignal,
+): Promise<PromptCoach | undefined> {
+  const stages = resolvedStages(config)
+    .map((stage) => stage.filter((backend) => backend.kind !== "google"))
+    .filter((stage) => stage.length > 0);
+  let last: unknown;
+  for (const stage of stages) {
+    if (signal?.aborted) throw abortError(signal);
+    try {
+      return await firstSuccess(
+        stage.map((backend) => async (taskSignal) => {
+          const opts = openAiOpts(config, backend);
+          const coach = await coachOnce(text, opts, taskSignal);
+          if (!coach) throw new Error(`${opts.name} returned unusable coach`);
+          return coach;
+        }),
+        signal,
+      );
+    } catch (err) {
+      if (signal?.aborted) throw abortError(signal);
+      last = err;
+    }
+  }
+  try {
+    const english = await translateGoogleToEnglish(text, signal);
+    return {
+      english,
+      better: "",
+      note: "对照译文。配 DeepSeek / 混元 / custom 可看记忆技巧。",
+    };
+  } catch (err) {
+    if (signal?.aborted) throw abortError(signal);
+    last = last ?? err;
+  }
+  throw last instanceof Error ? last : new Error(String(last ?? "learn failed"));
+}
+
+async function coachOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<PromptCoach | undefined> {
+  if (!opts.apiKey) throw new Error(`${opts.name} API key missing`);
+  if (!opts.baseUrl) throw new Error(`${opts.name} base URL missing`);
+  if (!opts.model) throw new Error(`${opts.name} model missing`);
+  const res = await fetch(joinUrl(opts.baseUrl, "chat/completions"), {
+    method: "POST",
+    signal,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${opts.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: opts.model,
+      temperature: 0,
+      ...(opts.disableThinking ? { thinking: { type: "disabled" } } : {}),
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are an English tutor for a Chinese software engineer. Do not answer the technical question.",
+            "Return ONLY JSON: {\"english\":\"...\",\"better\":\"...\",\"note\":\"...\"}.",
+            "english: natural spoken English they could type next time. Same intent. Everyday coding-agent English. Keep identifiers and paths.",
+            "better: compact LLM prompt for the same intent. Imperative. No greeting. Goal, constraints, output. Max 2 short sentences.",
+            "note: Chinese, 3-5 short sentences. 1) How the English is built (word order, key verbs). 2) 1-2 memory tips (谐音/拆词/场景) for the hardest words. 3) One next-time sentence they can reuse. Do not discuss the coding task.",
+          ].join(" "),
+        },
+        { role: "user", content: text },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${opts.name} HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  }
+  const payload = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return parsePromptCoach(payload.choices?.[0]?.message?.content ?? "", text);
+}
+
+function parsePromptCoach(raw: string, source: string): PromptCoach | undefined {
+  const stripped = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+  const slice = start >= 0 && end > start ? stripped.slice(start, end + 1) : stripped;
+  const parsed = tryJson(slice);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  if (!("english" in parsed) || !("note" in parsed)) return undefined;
+  const english = typeof parsed.english === "string" ? parsed.english.trim() : "";
+  const better = "better" in parsed && typeof parsed.better === "string" ? parsed.better.trim() : "";
+  const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
+  if (!english) return undefined;
+  if (note.length > 500 || english.length > Math.max(80, source.length * 3)) return undefined;
+  if (better.length > 280) return undefined;
+  return { english, better, note };
+}
+
+async function translateGoogleToEnglish(text: string, signal?: AbortSignal): Promise<string> {
+  const { masked, tokens } = protectMarkup(text);
+  const url = new URL(GOOGLE_ENDPOINT);
+  url.searchParams.set("client", "gtx");
+  url.searchParams.set("sl", "auto");
+  url.searchParams.set("tl", "en");
+  url.searchParams.set("dt", "t");
+  url.searchParams.set("q", masked);
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`Google Translate HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const english = restoreMarkup(flattenGoogle(body), tokens).trim();
+  if (!english || english === text) throw new Error("Google returned no English");
+  return english;
 }
 
 async function reviewOnce(text: string, opts: OpenAiOpts, signal?: AbortSignal): Promise<EnglishReview | undefined> {

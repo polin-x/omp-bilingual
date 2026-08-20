@@ -3,7 +3,7 @@ import type { Component, MarkdownTheme } from "@oh-my-pi/pi-tui";
 import { padding, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent";
 import type { BilingualDetails, Pair } from "./types.ts";
-import type { EnglishReview } from "./translate.ts";
+import type { EnglishReview, PromptCoach } from "./translate.ts";
 import { CUSTOM_TYPE, translationSuffix } from "./types.ts";
 
 type ThemeLike = {
@@ -206,6 +206,32 @@ export class EnglishReviewView implements Component {
   render(width: number): readonly string[] {
     if (!this.#review) return [];
     return renderEnglishReview(this.#review, this.theme).render(width);
+  }
+}
+
+export function renderPromptCoach(coach: PromptCoach, theme: ThemeLike): Component {
+  const lines = [
+    "下次可以这样问：",
+    coach.english,
+    coach.better ? `Try (LLM prompt): ${coach.better}` : "",
+    coach.note,
+  ].filter(Boolean);
+  return markedZh(lines.join("\n\n"), theme, markdownTheme(theme));
+}
+
+export class PromptCoachView implements Component {
+  #coach: PromptCoach | undefined;
+  constructor(private readonly theme: ThemeLike) {}
+
+  setCoach(coach: PromptCoach): void {
+    this.#coach = coach;
+  }
+
+  invalidate(): void {}
+
+  render(width: number): readonly string[] {
+    if (!this.#coach) return [];
+    return renderPromptCoach(this.#coach, this.theme).render(width);
   }
 }
 
