@@ -28,6 +28,7 @@ test("isChinesePrompt accepts Chinese-dominant questions", () => {
   expect(isChinesePrompt("能不能也把提问译成英文，并加上记忆技巧？")).toBe(true);
   expect(isChinesePrompt("帮我看下这个插件。")).toBe(true);
   expect(isChinesePrompt("这个 bug 怎么修")).toBe(true);
+  expect(isChinesePrompt("怎么用 TypeScript API？")).toBe(true);
 });
 
 test("isChinesePrompt rejects English, slash commands, and short replies", () => {

@@ -156,9 +156,8 @@ export function isEnglishPrompt(text: string): boolean {
 export function isChinesePrompt(text: string): boolean {
   const t = text.trim();
   if (t.length < 2 || t.startsWith("/")) return false;
-  const letters = t.match(/[A-Za-z]/g)?.length ?? 0;
   const cjk = t.match(/[\u3400-\u9fff]/g)?.length ?? 0;
-  return cjk >= 4 && cjk >= letters;
+  return cjk >= 3;
 }
 
 function isStructuralMarkdownLine(raw: string): boolean {

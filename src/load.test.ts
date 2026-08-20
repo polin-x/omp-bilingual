@@ -25,3 +25,11 @@ test("critical helpers are defined", async () => {
     expect(usedAt, `${name} used`).toBeGreaterThan(definedAt);
   }
 });
+
+test("before_agent_start dispatches Chinese prompts before English review", async () => {
+  const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+  const chinese = src.indexOf("isChinesePrompt(text)");
+  const english = src.indexOf("isEnglishPrompt(text)");
+  expect(chinese).toBeGreaterThan(-1);
+  expect(english).toBeGreaterThan(chinese);
+});

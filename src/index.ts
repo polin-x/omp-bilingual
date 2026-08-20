@@ -453,13 +453,13 @@ export default function bilingual(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event) => {
     if (!liveConfig.enabled) return;
     const text = event.prompt.trim();
-    if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
-      void runEnglishReview(text);
-      return { message: reviewCard(text) };
-    }
     if (liveConfig.learnEnglish && isChinesePrompt(text)) {
       void runPromptCoach(text);
       return { message: learnCard(text) };
+    }
+    if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
+      void runEnglishReview(text);
+      return { message: reviewCard(text) };
     }
   });
 
