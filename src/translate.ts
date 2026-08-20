@@ -482,7 +482,7 @@ function parsePromptCoach(raw: string, source: string): { coach: PromptCoach } |
   const better = "better" in parsed && typeof parsed.better === "string" ? parsed.better.trim() : "";
   const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
   if (!english) return { reason: "empty english" };
-  const maxEn = Math.max(80, source.length * 3);
+  const maxEn = Math.max(240, source.length * 6);
   if (note.length > 500) return { reason: `note too long (${note.length}>500)` };
   if (english.length > maxEn) return { reason: `english too long (${english.length}>${maxEn})` };
   if (better.length > 280) return { reason: `better too long (${better.length}>280)` };

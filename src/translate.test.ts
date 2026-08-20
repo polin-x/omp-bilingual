@@ -265,6 +265,28 @@ test("coach reports empty content with backend name on Google fallback", async (
   expect(coach?.note).toContain("failed: empty content");
 });
 
+test("coach accepts English longer than 3x a Chinese source", async () => {
+  const source =
+    "我还想你支持一个东西，在信号看板里支持一个右侧信号，就是在每个市场收盘后，自动根据子模块的前20只，来计算买卖点，并在信号看板里记录下来。";
+  const english =
+    "I also want you to support something, support a right-side signal in the signal board, that is, after each market closes, the buying and selling points are automatically calculated based on the first 20 stocks of the sub-module, and recorded.";
+  expect(english.length).toBeGreaterThan(source.length * 3);
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes("translate.googleapis.com")) throw new Error("google should not run");
+    return jsonResponse(
+      JSON.stringify({
+        english,
+        better: "Add a right-side signal after each market close.",
+        note: "also 放在动词前。谐音 all so：全都算上。",
+      }),
+    );
+  }) as typeof fetch;
+
+  const coach = await coachChinesePrompt(source, cfg);
+  expect(coach?.provider).toBe("llm");
+  expect(coach?.note).toContain("谐音");
+});
+
 test("google coach is not cached so a later LLM result can upgrade the same prompt", () => {
   const google = {
     english: "I also want you to support something",
