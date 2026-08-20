@@ -225,6 +225,24 @@ test("coachChinesePrompt uses Google when no LLM is configured", async () => {
   expect(coach?.note).toContain("对照译文");
 });
 
+test("custom-only coach failure never calls Google", async () => {
+  const hosts: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    hosts.push(new URL(url).host);
+    return jsonResponse("not-json");
+  }) as typeof fetch;
+
+  await expect(
+    coachChinesePrompt("能不能也把提问译成英文？", {
+      ...cfg,
+      fallback1: "off",
+      fallback2: "off",
+    }),
+  ).rejects.toThrow(/unusable coach|not-json|learn failed/);
+  expect(hosts).toEqual(["custom.test"]);
+});
+
 test("aborted review rejects after every racer has started", async () => {
   const ac = new AbortController();
   let calls = 0;

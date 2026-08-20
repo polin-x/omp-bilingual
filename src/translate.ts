@@ -384,16 +384,18 @@ export async function coachChinesePrompt(
       last = err;
     }
   }
-  try {
-    const english = await translateGoogleToEnglish(text, signal);
-    return {
-      english,
-      better: "",
-      note: "对照译文。配 DeepSeek / 混元 / custom 可看记忆技巧。",
-    };
-  } catch (err) {
-    if (signal?.aborted) throw abortError(signal);
-    last = last ?? err;
+  if (backendChain(config).includes("google")) {
+    try {
+      const english = await translateGoogleToEnglish(text, signal);
+      return {
+        english,
+        better: "",
+        note: "对照译文。配 DeepSeek / 混元 / custom 可看记忆技巧。",
+      };
+    } catch (err) {
+      if (signal?.aborted) throw abortError(signal);
+      last = last ?? err;
+    }
   }
   throw last instanceof Error ? last : new Error(String(last ?? "learn failed"));
 }
