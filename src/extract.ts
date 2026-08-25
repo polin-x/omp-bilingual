@@ -10,7 +10,7 @@ const CMD_PREFIX = /^[$#%>]\s+\S/;
 
 export type SourceParagraph = {
   text: string;
-  kind: "text" | "thinking";
+  kind: "text" | "thinking" | "think";
 };
 
 export function extractSourceParagraphs(message: { role?: string; content?: unknown }): SourceParagraph[] {
@@ -18,15 +18,31 @@ export function extractSourceParagraphs(message: { role?: string; content?: unkn
   const out: SourceParagraph[] = [];
   for (const block of message.content) {
     if (!block || typeof block !== "object") continue;
-    const rec = block as { type?: unknown; text?: unknown; thinking?: unknown };
+    const rec = block as {
+      type?: unknown;
+      text?: unknown;
+      thinking?: unknown;
+      name?: unknown;
+      arguments?: unknown;
+    };
     if (rec.type === "thinking" && typeof rec.thinking === "string") {
       for (const text of splitTranslatableParagraphs(rec.thinking)) out.push({ text, kind: "thinking" });
     }
     if (rec.type === "text" && typeof rec.text === "string") {
       for (const text of splitTranslatableParagraphs(rec.text)) out.push({ text, kind: "text" });
     }
+    if ((rec.type === "toolCall" || rec.type === "tool_call") && rec.name === "think") {
+      for (const text of extractThinkParagraphs(rec.arguments)) out.push({ text, kind: "think" });
+    }
   }
   return out;
+}
+
+export function extractThinkParagraphs(args: unknown): string[] {
+  if (!args || typeof args !== "object") return [];
+  const thoughts = "thoughts" in args ? args.thoughts : "thought" in args ? args.thought : undefined;
+  if (typeof thoughts !== "string") return [];
+  return splitTranslatableParagraphs(thoughts);
 }
 
 export type SessionLikeEntry = {

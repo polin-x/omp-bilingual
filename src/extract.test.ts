@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, splitTranslatableParagraphs } from "./extract.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, extractThinkParagraphs, findLastTranslatableAssistant, isChinesePrompt, splitTranslatableParagraphs } from "./extract.ts";
+
 
 test("extractAdvisorParagraphs pulls English notes only", () => {
   const texts = extractAdvisorParagraphs({
@@ -105,6 +106,41 @@ test("extractSourceParagraphs reads assistant text blocks", () => {
   });
   expect(out.map((p) => p.text)).toEqual(["Implemented and pushed.", "On every VPN connection attempt:"]);
 });
+
+test("extractThinkParagraphs keeps the session think-tool plan", () => {
+  const thoughts = [
+    "User wants me to:",
+    "1. Study UpdateCastscreenCodeLeboTask() from ~/golang-dev/it-castscreen-api",
+    "2. Update this project's cast code",
+    "3. Create a todo",
+    "4. DON'T modify code now",
+    "",
+    "This is a research + planning task. I need to:",
+    "- Find and understand UpdateCastscreenCodeLeboTask()",
+    "- Understand current cast code in this project (it-castscreen)",
+    "- Create a todo capturing the work",
+    "- No code modifications",
+    "",
+    "I should start by exploring both codebases in parallel. Use scout for the API repo if needed, grep/read for the function, and look at this project's cast code.",
+    "",
+    "Let me also check if there's a relevant skill - doesn't seem like browser-use or kero-automation apply.",
+    "",
+    "I'll search both repos and read the function.",
+  ].join("\n");
+  const paras = extractThinkParagraphs({ thoughts });
+  expect(paras.some((p) => p.startsWith("User wants me to:"))).toBe(true);
+  expect(paras.some((p) => p.includes("research + planning task"))).toBe(true);
+  expect(paras.some((p) => p.includes("exploring both codebases"))).toBe(true);
+  const out = extractSourceParagraphs({
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "Let me search both codebases in parallel.\n\n" },
+      { type: "toolCall", name: "think", arguments: { thoughts } },
+    ],
+  });
+  expect(out.filter((p) => p.kind === "think").map((p) => p.text)).toEqual(paras);
+});
+
 
 test("findLastTranslatableAssistant skips a later Chinese-only assistant", () => {
   const hit = findLastTranslatableAssistant(

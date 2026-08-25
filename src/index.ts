@@ -144,7 +144,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
 
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
-  let pendingHarvest = { thinking: [] as string[], texts: [] as string[], advisors: [] as string[] };
+  let pendingHarvest = { thinking: [] as string[], texts: [] as string[], advisors: [] as string[], thinks: [] as string[] };
 
   const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
 
@@ -284,8 +284,11 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   };
 
   const postTextCard = (texts: string[], kind: Pair["kind"] = "text") => {
-    if (!liveConfig.enabled || !liveConfig.translateText) return;
+    if (!liveConfig.enabled) return;
+    const allowed = kind === "think" || kind === "thinking" ? liveConfig.translateThinking : liveConfig.translateText;
+    if (!allowed) return;
     if (texts.length === 0) return;
+
     whenIdle(() => {
       const pairs = pairsFromCache(texts, kind);
       pi.sendMessage(
@@ -680,6 +683,17 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     const sources = extractSourceParagraphs(event.message);
     if (liveConfig.translateThinking) {
       for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
+      const thinks = uniqueParagraphs(sources.filter((s) => s.kind === "think").map((s) => s.text));
+      if (thinks.length > 0) {
+        const idle = !sessionIsIdle || sessionIsIdle();
+        if (idle) postTextCard(thinks, "think");
+        else pendingHarvest.thinks.push(...thinks);
+        void translateFresh(thinks, () => paintTextCards(thinks, "think")).catch((err) => {
+          pi.logger.error("bilingual think-tool translate failed", {
+            err: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
     }
     if (liveConfig.translateText) {
       for (const s of sources) if (s.kind === "text") pendingHarvest.texts.push(s.text);
@@ -698,18 +712,21 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
         });
       });
     }
+
   });
 
   pi.on("agent_end", (event) => {
     if (event.willContinue) return;
-    const { thinking, texts, advisors } = pendingHarvest;
-    pendingHarvest = { thinking: [], texts: [], advisors: [] };
+    const { thinking, texts, advisors, thinks } = pendingHarvest;
+    pendingHarvest = { thinking: [], texts: [], advisors: [], thinks: [] };
     if (advisors.length > 0) postTextCard(advisors, "advisor");
+    if (thinks.length > 0) postTextCard(uniqueParagraphs(thinks), "think");
     if (!textInlineInstalled && texts.length > 0) postTextCard(texts);
-    const paras = [...thinking, ...texts, ...advisors];
+    const paras = [...thinking, ...texts, ...advisors, ...thinks];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
       if (advisors.length > 0) paintTextCards(advisors, "advisor");
+      if (thinks.length > 0) paintTextCards(uniqueParagraphs(thinks), "think");
       if (!textInlineInstalled) paintTextCards(texts);
       paintInlineText();
       lastThinkingRender?.();

@@ -61,6 +61,20 @@ test("thinking renderer reuses the view for a thinkingIndex", async () => {
   expect(returned).toBeGreaterThan(renderer);
 });
 
+test("think-tool cards post xor harvest and ignore translateText", async () => {
+  const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+  expect(src).toContain('kind === "think" || kind === "thinking" ? liveConfig.translateThinking : liveConfig.translateText');
+  const start = src.indexOf('const thinks = uniqueParagraphs(sources.filter((s) => s.kind === "think")');
+  const end = src.indexOf("if (pendingHarvest.thinking.length > 0)", start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const block = src.slice(start, end);
+  expect(block).toContain("if (idle) postTextCard(thinks, \"think\")");
+  expect(block).toContain("else pendingHarvest.thinks.push(...thinks)");
+  expect(block).not.toContain("pendingHarvest.thinks.push(s.text)");
+});
+
+
 test("assistant body cards are skipped when the inline hook is installed", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
   expect(src).toContain("!textInlineInstalled && texts.length > 0");

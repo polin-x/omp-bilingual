@@ -93,21 +93,24 @@ export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Com
   });
   for (let i = 0; i < pairs.length; i++) {
     const pair = pairs[i]!;
-    const thinking = pair.kind === "thinking";
+    const thinking = pair.kind === "thinking" || pair.kind === "think";
     const advisor = pair.kind === "advisor";
     const last = i === pairs.length - 1;
     const zh = `${pair.zh}${last ? translationSuffix(pair.alias, pair.delayMs) : ""}`;
-    box.addChild(
-      new Trimmed(
-        new Markdown(advisor ? `EN  ${pair.en}` : pair.en, 0, 0, mdTheme, {
-          color: (t) => theme.fg(thinking ? "thinkingText" : "dim", t),
-          italic: thinking,
-        }),
-      ),
-    );
+    if (pair.kind !== "think") {
+      box.addChild(
+        new Trimmed(
+          new Markdown(advisor ? `EN  ${pair.en}` : pair.en, 0, 0, mdTheme, {
+            color: (t) => theme.fg(thinking ? "thinkingText" : "dim", t),
+            italic: thinking,
+          }),
+        ),
+      );
+    }
     box.addChild(markedZh(advisor ? `中  ${zh}` : zh, theme, mdTheme));
     if (i < pairs.length - 1) box.addChild(new Spacer(1));
   }
+
   box.addChild(
     new CornerTag(
       theme.fg("dim", pairs.some((p) => p.kind === "advisor") ? "译·advisor" : `译·${details.chain || details.backend}`),
