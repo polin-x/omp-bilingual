@@ -91,6 +91,13 @@ test("splitTranslatableParagraphs skips indented and long Markdown fences", () =
   ]);
 });
 
+test("truncated session thinking is one paragraph", () => {
+  const text =
+    "Need to verify CertificateEnrollment.ensureLocalNetworkProfile wasn't duplicated by the auto-repair. Also writeAndOpen should use openExisting. Update tests. Check controller rest of function still ha...\n\n";
+  expect(splitTranslatableParagraphs(text)).toEqual([text.trim()]);
+});
+
+
 test("extractSourceParagraphs reads assistant text blocks", () => {
   const out = extractSourceParagraphs({
     role: "assistant",

@@ -3,6 +3,10 @@ import { expect, test } from "bun:test";
 const REQUIRED = [
   "flushThinkingTranslate",
   "queueThinkingTranslate",
+  "flushTextTranslate",
+  "queueTextTranslate",
+  "attachInlineText",
+  "installInlineText",
   "reviewKeyOf",
   "paintReviews",
   "postTextCard",
@@ -44,4 +48,22 @@ test("postTextCard waits for idle before nextTurn send", async () => {
   expect(post).toBeGreaterThan(when);
   expect(send).toBeGreaterThan(post);
   expect(src.slice(post, send)).toContain("whenIdle");
+});
+
+
+test("thinking renderer reuses the view for a thinkingIndex", async () => {
+  const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+  expect(src).toContain("rememberThinkingView(thinkingViews, context.thinkingIndex");
+  expect(src).toContain("if (event.message.role === \"assistant\") thinkingViews.clear()");
+  const renderer = src.indexOf("pi.registerAssistantThinkingRenderer");
+  const returned = src.indexOf("return view;", renderer);
+  expect(renderer).toBeGreaterThan(-1);
+  expect(returned).toBeGreaterThan(renderer);
+});
+
+test("assistant body cards are skipped when the inline hook is installed", async () => {
+  const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+  expect(src).toContain("!textInlineInstalled && texts.length > 0");
+  expect(src).toContain("installUpdateContentHook");
+  expect(src).toContain("return installInlineText()");
 });

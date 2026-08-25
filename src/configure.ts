@@ -17,7 +17,7 @@ export async function runConfigure(ctx: ExtensionContext): Promise<PluginConfig 
       { label: "fallback2", description: fallbackLabel(cfg, cfg.fallback2) },
       { label: "target", description: `${cfg.target} · ${languageName(cfg.target)}` },
       { label: "thinking", description: cfg.translateThinking ? "on" : "off" },
-      { label: "text", description: cfg.translateText ? "card under reply" : "off" },
+      { label: "text", description: cfg.translateText ? "under the English reply" : "off" },
       { label: "review", description: cfg.reviewEnglish ? "check English prompts" : "off" },
       { label: "learn", description: cfg.learnEnglish ? "Chinese prompts → English + memory tips" : "off" },
       { label: "provider", description: providerHint(cfg) },
@@ -79,7 +79,7 @@ async function editItem(
   }
   if (item === "text") {
     const v = await ctx.ui.select("Translate reply text", [
-      { label: "on", description: "Card directly under the English reply" },
+      { label: "on", description: "Show translation under the English reply" },
       { label: "off", description: "Thinking only" },
     ]);
     if (v === undefined) return undefined;

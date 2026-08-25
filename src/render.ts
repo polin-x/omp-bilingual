@@ -6,7 +6,7 @@ import type { BilingualDetails, Pair } from "./types.ts";
 import type { EnglishReview, PromptCoach } from "./translate.ts";
 import { CUSTOM_TYPE, translationSuffix } from "./types.ts";
 
-type ThemeLike = {
+export type ThemeLike = {
   fg(color: string, text: string): string;
   bold(text: string): string;
   italic(text: string): string;
@@ -182,6 +182,8 @@ export class ThinkingTranslationView implements Component {
     );
   }
 }
+
+export class TextTranslationView extends ThinkingTranslationView {}
 
 export function renderEnglishReview(review: EnglishReview, theme: ThemeLike): Component {
   const recommended = review.better || review.corrected;

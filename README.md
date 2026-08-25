@@ -11,7 +11,7 @@ Oh My Pi 插件：把模型回复里的**英文段落**译成中英对照，原�
 | 位置 | 行为 |
 |---|---|
 | thinking 斜体框 | 回合结束后补一行中文。只画在 TUI，不写 session |
-| 终局英文回复 | 编辑器上方一张对照卡（widget）。不 `sendMessage` |
+| 终局英文回复 | 紧贴原文气泡下方一行中文。只画在 TUI，不写 session |
 | 中文提问 | 发完后一张学习卡：英文说法 + 记忆技巧。不进主模型 |
 | 不译 | 代码块、`$` 命令、路径、GFM 表格、标题、已是中文的段落 |
 | 不进主模型 | 不写 custom 消息进 context，不 `steer` |
@@ -86,7 +86,7 @@ omp plugin link /path/to/omp-bilingual
 
 ## 已知限制
 
-- 翻译在整轮 `agent_end` 之后后台跑。`message_end` 只收集原文，不发网、不 await。
+- 正文译文挂在 assistant 气泡里，段落下稳定后开始译。`message_end` 会立刻 flush。host 没有 text renderer 时才退回整轮结束的对照卡。
 - 不注册 `context` 钩子，避免每轮 LLM 前 `structuredClone` 整份历史。
 - 旧会话里已经写入的对照卡仍在 JSONL。host 会把它们当 developer 消息。升级后请 `/new`。
 - 工具跑完后 host 会重建 transcript，**工具前的 thinking 译文可能被拆掉**。

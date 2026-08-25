@@ -3,8 +3,9 @@ import { loadTranslationCache, saveTranslationCache, translationKey } from "./ca
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
 import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
-import { EnglishReviewView, PromptCoachView, TextCardView, ThinkingTranslationView } from "./render.ts";
-import { bindThinkingRefresh } from "./thinking-refresh.ts";
+import { EnglishReviewView, PromptCoachView, TextCardView, TextTranslationView, ThinkingTranslationView, type ThemeLike } from "./render.ts";
+import { asUpdateContentHost, contentHost, ensureTrailingView, extractAssistantText, installUpdateContentHook, removeTrailingView, themeFromModule } from "./text-attach.ts";
+import { bindThinkingRefresh, joinCachedZh, rememberThinkingView, uniqueParagraphs } from "./thinking-refresh.ts";
 import {
   backendChain,
   coachChinesePrompt,
@@ -29,7 +30,15 @@ import {
   type PluginConfig,
 } from "./types.ts";
 
-export default function bilingual(pi: ExtensionAPI): void {
+function isThemeLike(value: unknown): value is ThemeLike {
+  if (!value || typeof value !== "object") return false;
+  if (!("fg" in value) || typeof value.fg !== "function") return false;
+  if (!("bold" in value) || typeof value.bold !== "function") return false;
+  if (!("italic" in value) || typeof value.italic !== "function") return false;
+  return true;
+}
+
+export default function bilingual(pi: ExtensionAPI): Promise<void> {
   pi.setLabel("Bilingual");
 
   const paraZh = new Map<string, string>();
@@ -124,7 +133,15 @@ export default function bilingual(pi: ExtensionAPI): void {
   let idlePostTimers = new Set<unknown>();
   let cardEpoch = 0;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
+  let textQueued: { paras: string[]; requestRender: () => void } | undefined;
+  let textTimer: unknown;
+  let textInlineInstalled = false;
+  let inlineTheme: ThemeLike | undefined;
+  const lastTextRenders: Array<() => void> = [];
+  const textRefreshByView = new WeakMap<TextTranslationView, () => void>();
   let lastThinkingRender: (() => void) | undefined;
+  const thinkingViews = new Map<number, ThinkingTranslationView>();
+
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
   let pendingHarvest = { thinking: [] as string[], texts: [] as string[], advisors: [] as string[] };
@@ -436,12 +453,130 @@ export default function bilingual(pi: ExtensionAPI): void {
     thinkingTimer = scheduleTimer(flushThinkingTranslate, liveConfig.thinkingDebounceMs);
   };
 
+  const paintInlineText = () => {
+    for (const refresh of lastTextRenders) refresh();
+    ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
+
+  const flushTextTranslate = () => {
+    textTimer = undefined;
+    const job = textQueued;
+    textQueued = undefined;
+    if (!job) return;
+    void translateFresh(job.paras, job.requestRender).catch((err) => {
+      pi.logger.error("bilingual text translate failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
+  const queueTextTranslate = (paras: string[], requestRender: () => void) => {
+    textQueued = { paras, requestRender };
+    if (!scheduleTimer) {
+      void boot.then(() => {
+        if (textQueued) flushTextTranslate();
+      });
+      return;
+    }
+    if (textTimer != null) {
+      cancelTimer?.(textTimer);
+      textTimer = undefined;
+    }
+    textTimer = scheduleTimer(flushTextTranslate, liveConfig.thinkingDebounceMs);
+  };
+
+  const rememberTextRefresh = (view: TextTranslationView, refresh: () => void) => {
+    const prev = textRefreshByView.get(view);
+    if (prev) {
+      const idx = lastTextRenders.indexOf(prev);
+      if (idx >= 0) lastTextRenders[idx] = refresh;
+    } else {
+      lastTextRenders.push(refresh);
+      if (lastTextRenders.length > 16) lastTextRenders.shift();
+    }
+    textRefreshByView.set(view, refresh);
+  };
+
+  const isTextView = (child: unknown): child is TextTranslationView => child instanceof TextTranslationView;
+
+  const bindTextView = (view: TextTranslationView, text: string, requestRender: () => void): boolean => {
+    const { closed, open } = partitionTranslatableParagraphs(text);
+    const paras = uniqueParagraphs(open ? [...closed, open] : closed);
+    if (paras.length === 0) return false;
+    const refresh = bindThinkingRefresh({
+      view,
+      paras,
+      cachedZh,
+      stampFor,
+      requestRender,
+    });
+    rememberTextRefresh(view, refresh);
+    const zh = joinCachedZh(paras, cachedZh);
+    if (zh) view.setZh(zh, stampFor(paras));
+    const freshClosed = uniqueParagraphs(closed).filter(
+      (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
+    );
+    if (freshClosed.length > 0) queueTextTranslate(freshClosed, refresh);
+    return true;
+  };
+
+  const attachInlineText = (host: object, message: object, theme: ThemeLike) => {
+    if (configReady && (!liveConfig.enabled || !liveConfig.translateText)) return;
+    const container = contentHost(host);
+    if (!container) return;
+    const text = extractAssistantText(message);
+    if (!text) {
+      removeTrailingView(container, isTextView);
+      return;
+    }
+    const view = ensureTrailingView(container, isTextView, () => new TextTranslationView(theme));
+    if (!bindTextView(view, text, paintInlineText)) removeTrailingView(container, isTextView);
+  };
+
+  const installInlineText = async () => {
+    type HostApi = ExtensionAPI & {
+      registerAssistantTextRenderer?: (
+        renderer: (context: { text: string; requestRender: () => void }, theme: ThemeLike) => TextTranslationView | undefined,
+      ) => void;
+    };
+    const hostApi = pi as HostApi;
+    if (typeof hostApi.registerAssistantTextRenderer === "function") {
+      hostApi.registerAssistantTextRenderer((context, theme) => {
+        inlineTheme = theme;
+        if (configReady && (!liveConfig.enabled || !liveConfig.translateText)) return undefined;
+        const view = new TextTranslationView(theme);
+        if (!bindTextView(view, context.text, context.requestRender)) return undefined;
+        return view;
+      });
+      textInlineInstalled = true;
+      return;
+    }
+    try {
+      // Compiled omp may omit host subpaths; fall back to end-of-turn cards.
+      const ctor = asUpdateContentHost(await import("@oh-my-pi/pi-coding-agent/modes/components/assistant-message"));
+      if (!ctor) return;
+      const loadedTheme = themeFromModule(await import("@oh-my-pi/pi-coding-agent/modes/theme/theme"));
+      installUpdateContentHook(ctor, (host, message) => {
+        const theme = inlineTheme ?? (isThemeLike(loadedTheme) ? loadedTheme : undefined);
+        if (!theme) return;
+        attachInlineText(host, message, theme);
+      });
+      textInlineInstalled = true;
+    } catch (err) {
+      pi.logger.error("bilingual text hook unavailable", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+
   pi.registerAssistantThinkingRenderer((context, theme) => {
+    inlineTheme = theme;
     if (configReady && (!liveConfig.enabled || !liveConfig.translateThinking)) return undefined;
     const { closed, open } = partitionTranslatableParagraphs(context.text);
-    const paras = open ? [...closed, open] : closed;
+    const paras = uniqueParagraphs(open ? [...closed, open] : closed);
     if (paras.length === 0) return undefined;
-    const view = new ThinkingTranslationView(theme);
+    const view = rememberThinkingView(thinkingViews, context.thinkingIndex, () => new ThinkingTranslationView(theme));
     const refresh = bindThinkingRefresh({
       view,
       paras,
@@ -450,9 +585,9 @@ export default function bilingual(pi: ExtensionAPI): void {
       requestRender: () => context.requestRender(),
     });
     lastThinkingRender = refresh;
-    const zh = paras.map((p) => cachedZh(p)).filter((t): t is string => Boolean(t)).join("\n\n");
+    const zh = joinCachedZh(paras, cachedZh);
     if (zh) view.setZh(zh, stampFor(paras));
-    const freshClosed = closed.filter(
+    const freshClosed = uniqueParagraphs(closed).filter(
       (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
     );
     if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, refresh);
@@ -466,11 +601,12 @@ export default function bilingual(pi: ExtensionAPI): void {
     if (!hit) return;
     const texts = liveConfig.translateText ? hit.texts : [];
     const thinking = liveConfig.translateThinking ? hit.thinking : [];
-    if (!hit.alreadyCarded && texts.length > 0) postTextCard(texts);
+    if (!textInlineInstalled && !hit.alreadyCarded && texts.length > 0) postTextCard(texts);
     const paras = [...thinking, ...texts];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
-      paintTextCards(texts);
+      if (!textInlineInstalled) paintTextCards(texts);
+      paintInlineText();
       lastThinkingRender?.();
     }).catch((err) => {
       pi.logger.error("bilingual existing translate failed", {
@@ -478,6 +614,10 @@ export default function bilingual(pi: ExtensionAPI): void {
       });
     });
   };
+
+  pi.on("message_start", (event) => {
+    if (event.message.role === "assistant") thinkingViews.clear();
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     await boot;
@@ -532,6 +672,11 @@ export default function bilingual(pi: ExtensionAPI): void {
       thinkingTimer = undefined;
     }
     flushThinkingTranslate();
+    if (textTimer != null) {
+      cancelTimer?.(textTimer);
+      textTimer = undefined;
+    }
+    flushTextTranslate();
     const sources = extractSourceParagraphs(event.message);
     if (liveConfig.translateThinking) {
       for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
@@ -546,6 +691,13 @@ export default function bilingual(pi: ExtensionAPI): void {
         });
       });
     }
+    if (pendingHarvest.texts.length > 0) {
+      void translateFresh(pendingHarvest.texts, paintInlineText).catch((err) => {
+        pi.logger.error("bilingual text translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
   });
 
   pi.on("agent_end", (event) => {
@@ -553,12 +705,13 @@ export default function bilingual(pi: ExtensionAPI): void {
     const { thinking, texts, advisors } = pendingHarvest;
     pendingHarvest = { thinking: [], texts: [], advisors: [] };
     if (advisors.length > 0) postTextCard(advisors, "advisor");
-    if (texts.length > 0) postTextCard(texts);
+    if (!textInlineInstalled && texts.length > 0) postTextCard(texts);
     const paras = [...thinking, ...texts, ...advisors];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
       if (advisors.length > 0) paintTextCards(advisors, "advisor");
-      paintTextCards(texts);
+      if (!textInlineInstalled) paintTextCards(texts);
+      paintInlineText();
       lastThinkingRender?.();
     }).catch((err) => {
       pi.logger.error("bilingual translate failed", {
@@ -603,7 +756,11 @@ export default function bilingual(pi: ExtensionAPI): void {
       ctx.ui.notify(statusLine(next), "info");
     },
   });
+
+  return installInlineText();
 }
+
+
 
 const SUBCOMMANDS = [
   { name: "settings", description: "Open TUI settings: language, backend, key, thinking" },
