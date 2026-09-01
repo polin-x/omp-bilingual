@@ -5,7 +5,7 @@ import { runConfigure } from "./configure.ts";
 import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, PromptCoachView, TextCardView, TextTranslationView, ThinkingTranslationView, type ThemeLike } from "./render.ts";
 import { asUpdateContentHost, contentHost, ensureTrailingView, extractAssistantText, installUpdateContentHook, removeTrailingView, themeFromModule } from "./text-attach.ts";
-import { bindThinkingRefresh, joinCachedZh, rememberThinkingView, uniqueParagraphs } from "./thinking-refresh.ts";
+import { attachThinkingTranslation, uniqueParagraphs } from "./thinking-refresh.ts";
 import {
   backendChain,
   coachChinesePrompt,
@@ -139,8 +139,9 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   let inlineTheme: ThemeLike | undefined;
   const lastTextRenders: Array<() => void> = [];
   const textRefreshByView = new WeakMap<TextTranslationView, () => void>();
-  let lastThinkingRender: (() => void) | undefined;
-  const thinkingViews = new Map<number, ThinkingTranslationView>();
+  const lastThinkingRenders: Array<() => void> = [];
+  const thinkingRefreshByView = new WeakMap<ThinkingTranslationView, () => void>();
+
 
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
@@ -500,6 +501,24 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     textRefreshByView.set(view, refresh);
   };
 
+  const paintThinking = () => {
+    for (const refresh of lastThinkingRenders) refresh();
+    ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
+
+  const rememberThinkingRefresh = (view: ThinkingTranslationView, refresh: () => void) => {
+    const prev = thinkingRefreshByView.get(view);
+    if (prev) {
+      const idx = lastThinkingRenders.indexOf(prev);
+      if (idx >= 0) lastThinkingRenders[idx] = refresh;
+    } else {
+      lastThinkingRenders.push(refresh);
+      if (lastThinkingRenders.length > 16) lastThinkingRenders.shift();
+    }
+    thinkingRefreshByView.set(view, refresh);
+  };
+
+
   const isTextView = (child: unknown): child is TextTranslationView => child instanceof TextTranslationView;
 
   const bindTextView = (view: TextTranslationView, text: string, requestRender: () => void): boolean => {
@@ -572,30 +591,26 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     }
   };
 
-
   pi.registerAssistantThinkingRenderer((context, theme) => {
     inlineTheme = theme;
     if (configReady && (!liveConfig.enabled || !liveConfig.translateThinking)) return undefined;
-    const { closed, open } = partitionTranslatableParagraphs(context.text);
-    const paras = uniqueParagraphs(open ? [...closed, open] : closed);
-    if (paras.length === 0) return undefined;
-    const view = rememberThinkingView(thinkingViews, context.thinkingIndex, () => new ThinkingTranslationView(theme));
-    const refresh = bindThinkingRefresh({
-      view,
-      paras,
+    const attached = attachThinkingTranslation({
+      text: context.text,
+      createView: () => new ThinkingTranslationView(theme),
       cachedZh,
       stampFor,
       requestRender: () => context.requestRender(),
     });
-    lastThinkingRender = refresh;
-    const zh = joinCachedZh(paras, cachedZh);
-    if (zh) view.setZh(zh, stampFor(paras));
-    const freshClosed = uniqueParagraphs(closed).filter(
+    if (!attached) return undefined;
+    rememberThinkingRefresh(attached.view, attached.refresh);
+    const freshClosed = attached.closed.filter(
       (p) => !paraZh.has(keyOf(p)) && !paraFailed.has(keyOf(p)) && !paraBusy.has(keyOf(p)),
     );
-    if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, refresh);
-    return view;
+    if (freshClosed.length > 0) queueThinkingTranslate(freshClosed, paintThinking);
+    return attached.view;
   });
+
+
   const harvestExisting = (
     entries: ReadonlyArray<{ type?: string; message?: { role?: string; content?: unknown; customType?: string } }>,
   ) => {
@@ -610,7 +625,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     void translateFresh(paras, () => {
       if (!textInlineInstalled) paintTextCards(texts);
       paintInlineText();
-      lastThinkingRender?.();
+      paintThinking();
     }).catch((err) => {
       pi.logger.error("bilingual existing translate failed", {
         err: err instanceof Error ? err.message : String(err),
@@ -618,9 +633,6 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     });
   };
 
-  pi.on("message_start", (event) => {
-    if (event.message.role === "assistant") thinkingViews.clear();
-  });
 
   pi.on("session_start", async (_event, ctx) => {
     await boot;
@@ -699,7 +711,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
       for (const s of sources) if (s.kind === "text") pendingHarvest.texts.push(s.text);
     }
     if (pendingHarvest.thinking.length > 0) {
-      void translateFresh(pendingHarvest.thinking, lastThinkingRender).catch((err) => {
+      void translateFresh(pendingHarvest.thinking, paintThinking).catch((err) => {
         pi.logger.error("bilingual thinking translate failed", {
           err: err instanceof Error ? err.message : String(err),
         });
@@ -729,7 +741,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
       if (thinks.length > 0) paintTextCards(uniqueParagraphs(thinks), "think");
       if (!textInlineInstalled) paintTextCards(texts);
       paintInlineText();
-      lastThinkingRender?.();
+      paintThinking();
     }).catch((err) => {
       pi.logger.error("bilingual translate failed", {
         err: err instanceof Error ? err.message : String(err),

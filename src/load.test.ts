@@ -51,15 +51,19 @@ test("postTextCard waits for idle before nextTurn send", async () => {
 });
 
 
-test("thinking renderer reuses the view for a thinkingIndex", async () => {
+test("thinking renderer creates a new view every call", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
-  expect(src).toContain("rememberThinkingView(thinkingViews, context.thinkingIndex");
-  expect(src).toContain("if (event.message.role === \"assistant\") thinkingViews.clear()");
+  expect(src).toContain("attachThinkingTranslation");
+  expect(src).toContain("createView: () => new ThinkingTranslationView(theme)");
+  expect(src).not.toContain("rememberThinkingView");
+  expect(src).not.toContain("thinkingViews");
   const renderer = src.indexOf("pi.registerAssistantThinkingRenderer");
-  const returned = src.indexOf("return view;", renderer);
+  const returned = src.indexOf("return attached.view;", renderer);
   expect(renderer).toBeGreaterThan(-1);
   expect(returned).toBeGreaterThan(renderer);
 });
+
+
 
 test("think-tool cards post xor harvest and ignore translateText", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();

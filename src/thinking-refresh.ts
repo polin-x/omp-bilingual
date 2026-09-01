@@ -1,3 +1,5 @@
+import { partitionTranslatableParagraphs } from "./extract.ts";
+
 export type ThinkingStamp = { alias: string; delayMs: number };
 
 export type ThinkingView = {
@@ -27,19 +29,6 @@ export function joinCachedZh(paras: string[], cachedZh: (en: string) => string |
   return zhs.join("\n\n");
 }
 
-export function rememberThinkingView<T>(
-  views: Map<number, T>,
-  thinkingIndex: number,
-  create: () => T,
-): T {
-  const existing = views.get(thinkingIndex);
-  if (existing) return existing;
-  const view = create();
-  views.set(thinkingIndex, view);
-  return view;
-}
-
-
 export function bindThinkingRefresh(opts: {
   view: ThinkingView;
   paras: string[];
@@ -53,4 +42,27 @@ export function bindThinkingRefresh(opts: {
     opts.requestRender();
   };
 }
+
+export function attachThinkingTranslation<T extends ThinkingView>(opts: {
+  text: string;
+  createView: () => T;
+  cachedZh: (en: string) => string | undefined;
+  stampFor: (texts: string[]) => ThinkingStamp | undefined;
+  requestRender: () => void;
+}): { view: T; paras: string[]; closed: string[]; refresh: () => void } | undefined {
+  const { closed, open } = partitionTranslatableParagraphs(opts.text);
+  const paras = uniqueParagraphs(open ? [...closed, open] : closed);
+  if (paras.length === 0) return undefined;
+  const view = opts.createView();
+  const refresh = bindThinkingRefresh({
+    view,
+    paras,
+    cachedZh: opts.cachedZh,
+    stampFor: opts.stampFor,
+    requestRender: opts.requestRender,
+  });
+  view.setZh(joinCachedZh(paras, opts.cachedZh), opts.stampFor(paras));
+  return { view, paras, closed: uniqueParagraphs(closed), refresh };
+}
+
 
