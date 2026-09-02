@@ -1,6 +1,6 @@
 {
   "name": "omp-bilingual",
-  "version": "0.1.68",
+  "version": "0.1.69",
   "type": "module",
   "license": "MIT",
   "description": "Display-only Chinese/English translations for English assistant replies",

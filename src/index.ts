@@ -5,7 +5,7 @@ import { runConfigure } from "./configure.ts";
 import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, PromptCoachView, TextCardView, TextTranslationView, ThinkingTranslationView, type ThemeLike } from "./render.ts";
 import { asUpdateContentHost, contentHost, ensureTrailingView, extractAssistantText, installUpdateContentHook, removeTrailingView, themeFromModule } from "./text-attach.ts";
-import { attachThinkingTranslation, uniqueParagraphs } from "./thinking-refresh.ts";
+import { attachThinkingTranslation, bindThinkingRefresh, joinCachedZh, uniqueParagraphs } from "./thinking-refresh.ts";
 import {
   backendChain,
   coachChinesePrompt,

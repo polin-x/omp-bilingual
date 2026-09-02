@@ -31,6 +31,22 @@ test("critical helpers are defined", async () => {
   }
 });
 
+test("bindTextView imports bindThinkingRefresh and joinCachedZh", async () => {
+  const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+  const imp = src.match(/import \{([^}]+)\} from "\.\/thinking-refresh\.ts"/)?.[1] ?? "";
+  expect(imp).toContain("bindThinkingRefresh");
+  expect(imp).toContain("joinCachedZh");
+  expect(imp).toContain("attachThinkingTranslation");
+  const bind = src.indexOf("const bindTextView");
+  const end = src.indexOf("const attachInlineText", bind);
+  expect(bind).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(bind);
+  const body = src.slice(bind, end);
+  expect(body).toContain("bindThinkingRefresh(");
+  expect(body).toContain("joinCachedZh(");
+});
+
+
 test("before_agent_start dispatches Chinese prompts before English review", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
   const chinese = src.indexOf("isChinesePrompt(text)");
