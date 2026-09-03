@@ -63,7 +63,7 @@ test("plugin never registers a context hook or sendMessage cards", async () => {
   expect(src).not.toContain("await boot");
 });
 
-test("before_agent_start does not inject session messages", async () => {
+test("before_agent_start inserts prompt cards into the transcript", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
   const start = src.indexOf('pi.on("before_agent_start"');
   const end = src.indexOf('pi.on("message_end"', start);
@@ -72,8 +72,11 @@ test("before_agent_start does not inject session messages", async () => {
   const block = src.slice(start, end);
   expect(block).toContain("void runPromptCoach(text)");
   expect(block).toContain("void runEnglishReview(text)");
-  expect(block).not.toContain("return { message:");
+  expect(block).toContain("return { message: learnCard(text) }");
+  expect(block).toContain("return { message: reviewCard(text) }");
+  expect(block).not.toContain("setWidget");
 });
+
 
 test("thinking renderer creates a new view every call", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();

@@ -246,19 +246,24 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     for (const view of reviewViews) {
       if (reviewViewSource.get(view) === source) view.setReview(review);
     }
-    ui?.setWidget(
-      "bilingual-review",
-      (_tui, theme) => {
-        const view = new EnglishReviewView(theme);
-        view.setReview(review);
-        return view;
-      },
-      { placement: "aboveEditor" },
-    );
     ui?.setStatus("bilingual", barStatus(liveConfig));
   };
 
+
   const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
+
+  const reviewCard = (text: string) => {
+    const cached = parseCachedReview(paraZh.get(reviewKeyOf(text)) ?? "");
+    if (cached) paintReviews(text, cached);
+    return {
+      customType: REVIEW_TYPE,
+      content: "",
+      display: true as const,
+      attribution: "agent" as const,
+      details: { source: text, review: cached },
+    };
+  };
+
 
   const runEnglishReview = async (text: string) => {
     if (!backendChain(liveConfig).some((b) => b !== "google")) return;
@@ -299,16 +304,19 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     for (const view of coachViews) {
       if (coachViewSource.get(view) === source) view.setCoach(coach);
     }
-    ui?.setWidget(
-      "bilingual-learn",
-      (_tui, theme) => {
-        const view = new PromptCoachView(theme);
-        view.setCoach(coach);
-        return view;
-      },
-      { placement: "aboveEditor" },
-    );
     ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
+
+  const learnCard = (text: string) => {
+    const cached = reusableCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
+    if (cached) paintCoaches(text, cached);
+    return {
+      customType: LEARN_TYPE,
+      content: "",
+      display: true as const,
+      attribution: "agent" as const,
+      details: { source: text, coach: cached },
+    };
   };
 
   const runPromptCoach = async (text: string) => {
@@ -349,7 +357,10 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     ui = next;
     pi.setLabel(pluginLabel(liveConfig));
     next.setStatus("bilingual", barStatus(liveConfig));
+    next.setWidget("bilingual-review", undefined);
+    next.setWidget("bilingual-learn", undefined);
   };
+
 
 
   const flushThinkingTranslate = () => {
@@ -567,12 +578,14 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     const text = event.prompt.trim();
     if (liveConfig.learnEnglish && isChinesePrompt(text)) {
       void runPromptCoach(text);
-      return;
+      return { message: learnCard(text) };
     }
     if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
       void runEnglishReview(text);
+      return { message: reviewCard(text) };
     }
   });
+
 
   pi.on("message_end", (event) => {
     if (!liveConfig.enabled) return;

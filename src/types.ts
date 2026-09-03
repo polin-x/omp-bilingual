@@ -2,7 +2,7 @@ export const CUSTOM_TYPE = "com.omp.bilingual";
 export const REVIEW_TYPE = "com.omp.bilingual.review";
 export const LEARN_TYPE = "com.omp.bilingual.learn";
 export const PACKAGE_NAME = "omp-bilingual";
-export const PACKAGE_VERSION = "0.1.70";
+export const PACKAGE_VERSION = "0.1.71";
 
 export type ReviewDetails = {
   source: string;
