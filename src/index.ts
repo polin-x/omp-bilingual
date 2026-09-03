@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
+import { extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, PromptCoachView, TextCardView, TextTranslationView, ThinkingTranslationView, type ThemeLike } from "./render.ts";
 import { asUpdateContentHost, contentHost, ensureTrailingView, extractAssistantText, installUpdateContentHook, removeTrailingView, themeFromModule } from "./text-attach.ts";
 import { attachThinkingTranslation, bindThinkingRefresh, joinCachedZh, uniqueParagraphs } from "./thinking-refresh.ts";
@@ -112,10 +112,6 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   });
 
 
-  pi.on("context", (event) => ({
-    messages: event.messages.filter((m) => !isBilingualContextMessage(m)),
-  }));
-
   let liveConfig: PluginConfig = DEFAULT_CONFIG;
   let configReady = false;
   const boot = (async () => {
@@ -128,10 +124,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   })();
   let scheduleTimer: ((fn: () => void, ms: number) => unknown) | undefined;
   let cancelTimer: ((id: unknown) => void) | undefined;
-  let sessionIsIdle: (() => boolean) | undefined;
   let thinkingTimer: unknown;
-  let idlePostTimers = new Set<unknown>();
-  let cardEpoch = 0;
   let thinkingQueued: { paras: string[]; requestRender: () => void } | undefined;
   let textQueued: { paras: string[]; requestRender: () => void } | undefined;
   let textTimer: unknown;
@@ -142,10 +135,10 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   const lastThinkingRenders: Array<() => void> = [];
   const thinkingRefreshByView = new WeakMap<ThinkingTranslationView, () => void>();
 
-
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
-  let pendingHarvest = { thinking: [] as string[], texts: [] as string[], advisors: [] as string[], thinks: [] as string[] };
+  let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
+
 
   const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
 
@@ -183,14 +176,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     }
   };
 
-  const paintTextCards = (texts: string[], kind: Pair["kind"] = "text") => {
-    const pairs = pairsFromCache(texts, kind);
-    const key = textsKey(texts);
-    for (const view of textViews) {
-      if (textViewSource.get(view) === key) view.setPairs(pairs);
-    }
-    ui?.setStatus("bilingual", barStatus(liveConfig));
-  };
+
 
   const schedulePersist = () => {
     if (!scheduleTimer) return;
@@ -255,84 +241,24 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
       for (const p of fresh) paraBusy.delete(keyOf(p));
     }
   };
-  const whenIdle = (fn: () => void) => {
-    const epoch = cardEpoch;
-    const run = () => {
-      if (epoch !== cardEpoch) return;
-      fn();
-    };
-    if (!sessionIsIdle || sessionIsIdle()) {
-      run();
-      return;
-    }
-    if (!scheduleTimer) {
-      run();
-      return;
-    }
-    let id: unknown;
-    const tick = () => {
-      idlePostTimers.delete(id);
-      if (epoch !== cardEpoch) return;
-      if (!sessionIsIdle || sessionIsIdle()) {
-        run();
-        return;
-      }
-      id = scheduleTimer?.(tick, 32);
-      idlePostTimers.add(id);
-    };
-    id = scheduleTimer(tick, 32);
-    idlePostTimers.add(id);
-  };
-
-  const postTextCard = (texts: string[], kind: Pair["kind"] = "text") => {
-    if (!liveConfig.enabled) return;
-    const allowed = kind === "think" || kind === "thinking" ? liveConfig.translateThinking : liveConfig.translateText;
-    if (!allowed) return;
-    if (texts.length === 0) return;
-
-    whenIdle(() => {
-      const pairs = pairsFromCache(texts, kind);
-      pi.sendMessage(
-        {
-          customType: CUSTOM_TYPE,
-          content: "",
-          display: true,
-          attribution: "agent",
-          details: {
-            texts,
-            pairs,
-            kind,
-            backend: liveConfig.backend,
-            chain: describeChain(liveConfig),
-            ornament: liveConfig.ornament,
-          },
-        },
-        { triggerTurn: false, deliverAs: "nextTurn" },
-      );
-    });
-  };
-
-  const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
-
   const paintReviews = (source: string, review: EnglishReview) => {
     reviews.set(source, review);
     for (const view of reviewViews) {
       if (reviewViewSource.get(view) === source) view.setReview(review);
     }
+    ui?.setWidget(
+      "bilingual-review",
+      (_tui, theme) => {
+        const view = new EnglishReviewView(theme);
+        view.setReview(review);
+        return view;
+      },
+      { placement: "aboveEditor" },
+    );
     ui?.setStatus("bilingual", barStatus(liveConfig));
   };
 
-  const reviewCard = (text: string) => {
-    const cached = parseCachedReview(paraZh.get(reviewKeyOf(text)) ?? "");
-    if (cached) paintReviews(text, cached);
-    return {
-      customType: REVIEW_TYPE,
-      content: "",
-      display: true as const,
-      attribution: "agent" as const,
-      details: { source: text, review: cached },
-    };
-  };
+  const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
 
   const runEnglishReview = async (text: string) => {
     if (!backendChain(liveConfig).some((b) => b !== "google")) return;
@@ -373,19 +299,16 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     for (const view of coachViews) {
       if (coachViewSource.get(view) === source) view.setCoach(coach);
     }
+    ui?.setWidget(
+      "bilingual-learn",
+      (_tui, theme) => {
+        const view = new PromptCoachView(theme);
+        view.setCoach(coach);
+        return view;
+      },
+      { placement: "aboveEditor" },
+    );
     ui?.setStatus("bilingual", barStatus(liveConfig));
-  };
-
-  const learnCard = (text: string) => {
-    const cached = reusableCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
-    if (cached) paintCoaches(text, cached);
-    return {
-      customType: LEARN_TYPE,
-      content: "",
-      display: true as const,
-      attribution: "agent" as const,
-      details: { source: text, coach: cached },
-    };
   };
 
   const runPromptCoach = async (text: string) => {
@@ -426,9 +349,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     ui = next;
     pi.setLabel(pluginLabel(liveConfig));
     next.setStatus("bilingual", barStatus(liveConfig));
-    next.setWidget("bilingual", undefined);
-    next.setWidget("bilingual-review", undefined);
   };
+
 
   const flushThinkingTranslate = () => {
     thinkingTimer = undefined;
@@ -619,11 +541,9 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     if (!hit) return;
     const texts = liveConfig.translateText ? hit.texts : [];
     const thinking = liveConfig.translateThinking ? hit.thinking : [];
-    if (!textInlineInstalled && !hit.alreadyCarded && texts.length > 0) postTextCard(texts);
     const paras = [...thinking, ...texts];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
-      if (!textInlineInstalled) paintTextCards(texts);
       paintInlineText();
       paintThinking();
     }).catch((err) => {
@@ -633,14 +553,13 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     });
   };
 
-
-  pi.on("session_start", async (_event, ctx) => {
-    await boot;
+  pi.on("session_start", (_event, ctx) => {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
     cancelTimer = (id) => ctx.clearTimer(id);
-    sessionIsIdle = () => ctx.isIdle();
-    applyUi(ctx.ui);
-    harvestExisting(ctx.sessionManager.getEntries());
+    void boot.then(() => {
+      applyUi(ctx.ui);
+      harvestExisting(ctx.sessionManager.getEntries());
+    });
   });
 
   pi.on("before_agent_start", (event) => {
@@ -648,38 +567,15 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     const text = event.prompt.trim();
     if (liveConfig.learnEnglish && isChinesePrompt(text)) {
       void runPromptCoach(text);
-      return { message: learnCard(text) };
+      return;
     }
     if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
       void runEnglishReview(text);
-      return { message: reviewCard(text) };
     }
-  });
-
-  pi.on("agent_start", () => {
-    cardEpoch += 1;
-    for (const id of idlePostTimers) cancelTimer?.(id);
-    idlePostTimers.clear();
-    ui?.setWidget("bilingual", undefined);
   });
 
   pi.on("message_end", (event) => {
     if (!liveConfig.enabled) return;
-    const customType = "customType" in event.message ? event.message.customType : undefined;
-    if (event.message.role === "custom" && customType === "advisor") {
-      if (!liveConfig.translateText) return;
-      const texts = extractAdvisorParagraphs(event.message);
-      if (texts.length === 0) return;
-      const idle = !sessionIsIdle || sessionIsIdle();
-      if (idle) postTextCard(texts, "advisor");
-      else pendingHarvest.advisors.push(...texts);
-      void translateFresh(texts, () => paintTextCards(texts, "advisor")).catch((err) => {
-        pi.logger.error("bilingual advisor translate failed", {
-          err: err instanceof Error ? err.message : String(err),
-        });
-      });
-      return;
-    }
     if (event.message.role === "user") return;
     if (event.message.role !== "assistant") return;
     if (thinkingTimer != null) {
@@ -695,17 +591,6 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     const sources = extractSourceParagraphs(event.message);
     if (liveConfig.translateThinking) {
       for (const s of sources) if (s.kind === "thinking") pendingHarvest.thinking.push(s.text);
-      const thinks = uniqueParagraphs(sources.filter((s) => s.kind === "think").map((s) => s.text));
-      if (thinks.length > 0) {
-        const idle = !sessionIsIdle || sessionIsIdle();
-        if (idle) postTextCard(thinks, "think");
-        else pendingHarvest.thinks.push(...thinks);
-        void translateFresh(thinks, () => paintTextCards(thinks, "think")).catch((err) => {
-          pi.logger.error("bilingual think-tool translate failed", {
-            err: err instanceof Error ? err.message : String(err),
-          });
-        });
-      }
     }
     if (liveConfig.translateText) {
       for (const s of sources) if (s.kind === "text") pendingHarvest.texts.push(s.text);
@@ -724,22 +609,15 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
         });
       });
     }
-
   });
 
   pi.on("agent_end", (event) => {
     if (event.willContinue) return;
-    const { thinking, texts, advisors, thinks } = pendingHarvest;
-    pendingHarvest = { thinking: [], texts: [], advisors: [], thinks: [] };
-    if (advisors.length > 0) postTextCard(advisors, "advisor");
-    if (thinks.length > 0) postTextCard(uniqueParagraphs(thinks), "think");
-    if (!textInlineInstalled && texts.length > 0) postTextCard(texts);
-    const paras = [...thinking, ...texts, ...advisors, ...thinks];
+    const { thinking, texts } = pendingHarvest;
+    pendingHarvest = { thinking: [], texts: [] };
+    const paras = [...thinking, ...texts];
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
-      if (advisors.length > 0) paintTextCards(advisors, "advisor");
-      if (thinks.length > 0) paintTextCards(uniqueParagraphs(thinks), "think");
-      if (!textInlineInstalled) paintTextCards(texts);
       paintInlineText();
       paintThinking();
     }).catch((err) => {
@@ -748,6 +626,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
       });
     });
   });
+
 
   pi.registerCommand("bilingual", {
     description: "Toggle or open bilingual settings",
