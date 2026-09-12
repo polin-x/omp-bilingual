@@ -70,12 +70,15 @@ test("before_agent_start inserts prompt cards into the transcript", async () => 
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const block = src.slice(start, end);
+  expect(block).toContain("if (!configReady || !liveConfig.enabled) return");
+  expect(block).toContain("jobsAbort.abort()");
   expect(block).toContain("void runPromptCoach(text)");
   expect(block).toContain("void runEnglishReview(text)");
   expect(block).toContain("return { message: learnCard(text) }");
   expect(block).toContain("return { message: reviewCard(text) }");
   expect(block).not.toContain("setWidget");
 });
+
 
 
 test("thinking renderer creates a new view every call", async () => {

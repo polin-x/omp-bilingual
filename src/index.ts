@@ -138,6 +138,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   let persistTimer: unknown;
   let ui: ExtensionUIContext | undefined;
   let pendingHarvest = { thinking: [] as string[], texts: [] as string[] };
+  let jobsAbort = new AbortController();
+
 
 
   const keyOf = (en: string) => translationKey(en, liveConfig.target, liveConfig.backend);
@@ -219,7 +221,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     for (const p of fresh) paraBusy.add(keyOf(p));
     try {
       if (!liveConfig.enabled) return [];
-      const pairs = await translateParagraphs(fresh, liveConfig);
+      const pairs = await translateParagraphs(fresh, liveConfig, jobsAbort.signal);
+
       const out: Pair[] = [];
       for (const pair of pairs) {
         if (pair.zh && pair.zh !== pair.en) {
@@ -279,7 +282,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     }
     reviewBusy.add(text);
     try {
-      const review = await reviewEnglishPrompt(text, liveConfig);
+      const review = await reviewEnglishPrompt(text, liveConfig, jobsAbort.signal);
+
       if (!review) return;
       paraZh.set(cacheKey, JSON.stringify(review));
       void saveTranslationCache(paraZh, stamps).catch((err) => {
@@ -332,7 +336,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     }
     coachBusy.add(text);
     try {
-      const coach = await coachChinesePrompt(text, liveConfig);
+      const coach = await coachChinesePrompt(text, liveConfig, jobsAbort.signal);
+
       if (!coach) return;
       const stored = serializeCoachCache(coach);
       if (stored) {
@@ -476,7 +481,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   };
 
   const attachInlineText = (host: object, message: object, theme: ThemeLike) => {
-    if (configReady && (!liveConfig.enabled || !liveConfig.translateText)) return;
+    if (!configReady || !liveConfig.enabled || !liveConfig.translateText) return;
+
     const container = contentHost(host);
     if (!container) return;
     const text = extractAssistantText(message);
@@ -498,7 +504,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     if (typeof hostApi.registerAssistantTextRenderer === "function") {
       hostApi.registerAssistantTextRenderer((context, theme) => {
         inlineTheme = theme;
-        if (configReady && (!liveConfig.enabled || !liveConfig.translateText)) return undefined;
+        if (!configReady || !liveConfig.enabled || !liveConfig.translateText) return undefined;
+
         const view = new TextTranslationView(theme);
         if (!bindTextView(view, context.text, context.requestRender)) return undefined;
         return view;
@@ -526,7 +533,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
 
   pi.registerAssistantThinkingRenderer((context, theme) => {
     inlineTheme = theme;
-    if (configReady && (!liveConfig.enabled || !liveConfig.translateThinking)) return undefined;
+    if (!configReady || !liveConfig.enabled || !liveConfig.translateThinking) return undefined;
+
     const attached = attachThinkingTranslation({
       text: context.text,
       createView: () => new ThinkingTranslationView(theme),
@@ -574,7 +582,9 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   });
 
   pi.on("before_agent_start", (event) => {
-    if (!liveConfig.enabled) return;
+    jobsAbort.abort();
+    jobsAbort = new AbortController();
+    if (!configReady || !liveConfig.enabled) return;
     const text = event.prompt.trim();
     if (liveConfig.learnEnglish && isChinesePrompt(text)) {
       void runPromptCoach(text);
@@ -585,6 +595,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
       return { message: reviewCard(text) };
     }
   });
+
 
 
   pi.on("message_end", (event) => {

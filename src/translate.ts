@@ -123,23 +123,34 @@ async function translateOnce(
 }
 
 async function translateGoogle(paragraphs: string[], config: PluginConfig, signal?: AbortSignal): Promise<Pair[]> {
-  const pairs: Pair[] = [];
-  for (const en of paragraphs) {
-    const { masked, tokens } = protectMarkup(en);
-    const url = new URL(GOOGLE_ENDPOINT);
-    url.searchParams.set("client", "gtx");
-    url.searchParams.set("sl", config.sourceLang || "auto");
-    url.searchParams.set("tl", config.target || "zh-CN");
-    url.searchParams.set("dt", "t");
-    url.searchParams.set("q", masked);
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`Google Translate HTTP ${res.status}`);
-    const body: unknown = await res.json();
-    const zh = applyTechGlossary(en, restoreMarkup(flattenGoogle(body), tokens));
-    if (looksLikeTranslation(en, zh)) pairs.push({ en, zh });
-  }
-  return pairs;
+  const pairs: Array<Pair | undefined> = new Array(paragraphs.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      if (signal?.aborted) throw abortError(signal);
+      const idx = cursor;
+      cursor += 1;
+      if (idx >= paragraphs.length) return;
+      const en = paragraphs[idx]!;
+      const { masked, tokens } = protectMarkup(en);
+      const url = new URL(GOOGLE_ENDPOINT);
+      url.searchParams.set("client", "gtx");
+      url.searchParams.set("sl", config.sourceLang || "auto");
+      url.searchParams.set("tl", config.target || "zh-CN");
+      url.searchParams.set("dt", "t");
+      url.searchParams.set("q", masked);
+      const res = await fetch(url, { signal });
+      if (!res.ok) throw new Error(`Google Translate HTTP ${res.status}`);
+      const body: unknown = await res.json();
+      const zh = applyTechGlossary(en, restoreMarkup(flattenGoogle(body), tokens));
+      if (looksLikeTranslation(en, zh)) pairs[idx] = { en, zh };
+    }
+  };
+  const n = Math.min(4, paragraphs.length);
+  if (n > 0) await Promise.all(Array.from({ length: n }, () => worker()));
+  return pairs.filter((p): p is Pair => p !== undefined);
 }
+
 
 function flattenGoogle(body: unknown): string {
   if (!Array.isArray(body) || !Array.isArray(body[0])) return "";

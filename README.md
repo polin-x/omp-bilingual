@@ -98,7 +98,8 @@ omp plugin link /path/to/omp-bilingual
 
 - 工具跑完后 host 会重建 transcript，**工具前的 thinking 译文可能被拆掉**。
 - 终局回复已经是中文时，不显示对照。
-- Google 免费接口非正式产品 API，可能限流或抽风。
+- Google 免费接口非正式产品 API，可能限流或抽风。段落最多 4 路并行；新提示会 abort 上一回合还在飞的翻译。
+
 
 ## 发布
 

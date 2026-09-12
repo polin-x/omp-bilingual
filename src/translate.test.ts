@@ -369,6 +369,33 @@ test("aborted translate rejects after every racer has started", async () => {
   expect(calls).toBe(1);
 });
 
+test("google translates paragraphs concurrently and keeps source order", async () => {
+  let inflight = 0;
+  let max = 0;
+  const waiters: Array<() => void> = [];
+  globalThis.fetch = (async (input) => {
+    inflight += 1;
+    max = Math.max(max, inflight);
+    if (inflight < 3) {
+      await new Promise<void>((resolve) => {
+        waiters.push(resolve);
+      });
+    } else {
+      for (const release of waiters) release();
+    }
+    inflight -= 1;
+    const q = new URL(String(input)).searchParams.get("q") ?? "";
+    return new Response(JSON.stringify([[[`译:${q}`, q]]]), { status: 200 });
+  }) as typeof fetch;
+
+  const paras = ["Hello world.", "Need git status first.", "Then push."];
+  const pairs = await translateParagraphs(paras, { ...DEFAULT_CONFIG, backend: "google" });
+  expect(max).toBe(3);
+  expect(pairs.map((p) => p.en)).toEqual(paras);
+  expect(pairs.map((p) => p.zh)).toEqual(paras.map((p) => `译:${p}`));
+});
+
+
 test("all customs failing falls through to the next stage", async () => {
   const multi: PluginConfig = {
     ...cfg,
