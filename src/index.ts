@@ -255,22 +255,10 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
 
   const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
 
-  const reviewCard = (text: string) => {
-    const cached = parseCachedReview(paraZh.get(reviewKeyOf(text)) ?? "");
-    if (cached) paintReviews(text, cached);
-    return {
-      customType: REVIEW_TYPE,
-      content: "",
-      display: true as const,
-      attribution: "agent" as const,
-      details: { source: text, review: cached },
-    };
-  };
-
-
   const runEnglishReview = async (text: string) => {
     if (!backendChain(liveConfig).some((b) => b !== "google")) return;
     if (reviewBusy.has(text)) return;
+
     const cacheKey = reviewKeyOf(text);
     const cached = paraZh.get(cacheKey);
     if (cached) {
@@ -311,20 +299,9 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     ui?.setStatus("bilingual", barStatus(liveConfig));
   };
 
-  const learnCard = (text: string) => {
-    const cached = reusableCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
-    if (cached) paintCoaches(text, cached);
-    return {
-      customType: LEARN_TYPE,
-      content: "",
-      display: true as const,
-      attribution: "agent" as const,
-      details: { source: text, coach: cached },
-    };
-  };
-
   const runPromptCoach = async (text: string) => {
     if (coachBusy.has(text)) return;
+
     const cacheKey = learnKeyOf(text);
     const cached = paraZh.get(cacheKey);
     if (cached) {
@@ -588,13 +565,13 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     const text = event.prompt.trim();
     if (liveConfig.learnEnglish && isChinesePrompt(text)) {
       void runPromptCoach(text);
-      return { message: learnCard(text) };
+      return;
     }
     if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
       void runEnglishReview(text);
-      return { message: reviewCard(text) };
     }
   });
+
 
 
 

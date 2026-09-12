@@ -12,9 +12,10 @@ Oh My Pi 插件：把模型回复里的**英文段落**译成中英对照，原�
 |---|---|
 | thinking 斜体框 | 后台译完补一行中文。只画在 TUI，不写 session |
 | 终局英文回复 | 紧贴原文气泡下方一行中文。只画在 TUI，不写 session |
-| 中文提问 | 用户消息后面一张学习卡，随 transcript 上滚 |
+| 中文提问 | 后台出学习结果，不写 session，不进主模型 |
 | 不译 | 代码块、`$` 命令、路径、GFM 表格、标题、已是中文的段落 |
-| 主模型 | 不注册 `context` 钩子。学习/批改卡 `content` 为空：core pending 里仍有空 `developer` 壳，OpenAI/Anthropic/Google 的 wire 适配器会丢掉空块。details 不进 prompt |
+| 主模型 | 不注册 `context` 钩子，也不再 `return { message }`。旧会话里非空对照卡仍可能被转成 developer，请 `/new` |
+
 
 
 
@@ -92,7 +93,8 @@ omp plugin link /path/to/omp-bilingual
 
 - 正文译文挂在 assistant 气泡里，段落下稳定后开始译。`message_end` 立刻 flush，不等主回合。
 - 不注册 `context` 钩子，避免每轮 LLM 前 `structuredClone` 整份历史。
-- `before_agent_start` 的学习/批改卡会进 pending messages，`convertMessageToLlm` 转成 `developer`。`content` 是空字符串，所以这是无正文的空壳；OpenAI / Anthropic / Google 适配器在组 wire 时丢掉空 text block。details 里的对照不进模型。旧会话里非空对照卡请 `/new`。
+- 学习/批改不再写入 pending messages。旧 JSONL 里的 `com.omp.bilingual*` 卡仍可能被转成 `developer`，请 `/new`。
+
 
 
 
