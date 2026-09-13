@@ -146,8 +146,9 @@ async function translateGoogle(paragraphs: string[], config: PluginConfig, signa
       if (looksLikeTranslation(en, zh)) pairs[idx] = { en, zh };
     }
   };
-  const n = Math.min(4, paragraphs.length);
+  const n = paragraphs.length;
   if (n > 0) await Promise.all(Array.from({ length: n }, () => worker()));
+
   return pairs.filter((p): p is Pair => p !== undefined);
 }
 

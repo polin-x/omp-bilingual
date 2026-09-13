@@ -2,18 +2,23 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractSourceParagraphs, findLastTranslatableAssistant, partitionTranslatableParagraphs } from "./extract.ts";
+import { extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, PromptCoachView, TextCardView, TextTranslationView, ThinkingTranslationView, type ThemeLike } from "./render.ts";
 import { asUpdateContentHost, contentHost, ensureTrailingView, extractAssistantText, installUpdateContentHook, removeTrailingView, themeFromModule } from "./text-attach.ts";
 import { attachThinkingTranslation, bindThinkingRefresh, joinCachedZh, uniqueParagraphs } from "./thinking-refresh.ts";
 import {
+  backendChain,
+  coachChinesePrompt,
   describeChain,
   looksLikeTranslation,
+  reviewEnglishPrompt,
   reusableCachedCoach,
+  serializeCoachCache,
   translateParagraphs,
   type EnglishReview,
   type PromptCoach,
 } from "./translate.ts";
+
 
 import {
   CUSTOM_TYPE,
@@ -45,9 +50,12 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   const reviews = new Map<string, EnglishReview>();
   const reviewViews: EnglishReviewView[] = [];
   const reviewViewSource = new WeakMap<EnglishReviewView, string>();
+  const reviewBusy = new Set<string>();
   const coaches = new Map<string, PromptCoach>();
   const coachViews: PromptCoachView[] = [];
   const coachViewSource = new WeakMap<PromptCoachView, string>();
+  const coachBusy = new Set<string>();
+
 
   const textViews: TextCardView[] = [];
   const textViewSource = new WeakMap<TextCardView, string>();
@@ -241,7 +249,114 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     }
   };
   const reviewKeyOf = (en: string) => `review\t${liveConfig.backend}\t${en}`;
+
+  const paintReviews = (source: string, review: EnglishReview) => {
+    reviews.set(source, review);
+    for (const view of reviewViews) {
+      if (reviewViewSource.get(view) === source) view.setReview(review);
+    }
+    ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
+
+  const reviewCard = (text: string) => {
+    const cached = parseCachedReview(paraZh.get(reviewKeyOf(text)) ?? "");
+    if (cached) paintReviews(text, cached);
+    return {
+      customType: REVIEW_TYPE,
+      content: "",
+      display: true as const,
+      attribution: "agent" as const,
+      details: { source: text, review: cached },
+    };
+  };
+
+  const runEnglishReview = async (text: string) => {
+    if (!backendChain(liveConfig).some((b) => b !== "google")) return;
+    if (reviewBusy.has(text)) return;
+    const cacheKey = reviewKeyOf(text);
+    const cached = paraZh.get(cacheKey);
+    if (cached) {
+      const review = parseCachedReview(cached);
+      if (review) {
+        paintReviews(text, review);
+        return;
+      }
+    }
+    reviewBusy.add(text);
+    try {
+      const review = await reviewEnglishPrompt(text, liveConfig, jobsAbort.signal);
+      if (!review) return;
+      paraZh.set(cacheKey, JSON.stringify(review));
+      void saveTranslationCache(paraZh, stamps).catch((err) => {
+        pi.logger.error("bilingual cache save failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+      paintReviews(text, review);
+    } catch (err) {
+      pi.logger.error("bilingual english review failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      reviewBusy.delete(text);
+    }
+  };
+
   const learnKeyOf = (zh: string) => `learn\t${liveConfig.backend}\t${zh}`;
+
+  const paintCoaches = (source: string, coach: PromptCoach) => {
+    coaches.set(source, coach);
+    for (const view of coachViews) {
+      if (coachViewSource.get(view) === source) view.setCoach(coach);
+    }
+    ui?.setStatus("bilingual", barStatus(liveConfig));
+  };
+
+  const learnCard = (text: string) => {
+    const cached = reusableCachedCoach(paraZh.get(learnKeyOf(text)) ?? "");
+    if (cached) paintCoaches(text, cached);
+    return {
+      customType: LEARN_TYPE,
+      content: "",
+      display: true as const,
+      attribution: "agent" as const,
+      details: { source: text, coach: cached },
+    };
+  };
+
+  const runPromptCoach = async (text: string) => {
+    if (coachBusy.has(text)) return;
+    const cacheKey = learnKeyOf(text);
+    const cached = paraZh.get(cacheKey);
+    if (cached) {
+      const coach = reusableCachedCoach(cached);
+      if (coach) {
+        paintCoaches(text, coach);
+        return;
+      }
+    }
+    coachBusy.add(text);
+    try {
+      const coach = await coachChinesePrompt(text, liveConfig, jobsAbort.signal);
+      if (!coach) return;
+      const stored = serializeCoachCache(coach);
+      if (stored) {
+        paraZh.set(cacheKey, stored);
+        void saveTranslationCache(paraZh, stamps).catch((err) => {
+          pi.logger.error("bilingual cache save failed", {
+            err: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+      paintCoaches(text, coach);
+    } catch (err) {
+      pi.logger.error("bilingual chinese prompt coach failed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      coachBusy.delete(text);
+    }
+  };
 
 
   const applyUi = (next: ExtensionUIContext) => {
@@ -467,10 +582,21 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     });
   });
 
-  pi.on("before_agent_start", () => {
+  pi.on("before_agent_start", (event) => {
     jobsAbort.abort();
     jobsAbort = new AbortController();
+    if (!configReady || !liveConfig.enabled) return;
+    const text = event.prompt.trim();
+    if (liveConfig.learnEnglish && isChinesePrompt(text)) {
+      void runPromptCoach(text);
+      return { message: learnCard(text) };
+    }
+    if (liveConfig.reviewEnglish && isEnglishPrompt(text) && backendChain(liveConfig).some((b) => b !== "google")) {
+      void runEnglishReview(text);
+      return { message: reviewCard(text) };
+    }
   });
+
 
 
 
