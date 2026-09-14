@@ -7,12 +7,15 @@ const REQUIRED = [
   "queueTextTranslate",
   "attachInlineText",
   "installInlineText",
+  "installAdvisorTranslate",
+  "bindAdvisorCard",
   "reviewKeyOf",
   "paintReviews",
   "pairsFromCache",
   "runEnglishReview",
   "runPromptCoach",
 ];
+
 
 const ORDERED = ["flushThinkingTranslate", "paintReviews"];
 

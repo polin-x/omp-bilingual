@@ -12,9 +12,11 @@ Oh My Pi 插件：把模型回复里的**英文段落**译成中英对照，原�
 |---|---|
 | thinking 斜体框 | 后台译完补一行中文。只画在 TUI，不写 session |
 | 终局英文回复 | 紧贴原文气泡下方一行中文。只画在 TUI，不写 session |
+| Advisor 笔记 | 挂在 Advisor 卡下方一行中文。只画在 TUI，不写 session |
 | 中文提问 | 用户消息后一张学习卡，随 transcript 上滚。`content` 为空 |
-| 不译 | 代码块、`$` 命令、路径、GFM 表格、标题、已是中文的段落 |
 | 主模型 | 不注册 `context` 钩子。对照卡 `content` 为空，主流 provider 丢掉空块 |
+
+
 
 
 
@@ -104,7 +106,8 @@ omp plugin link /path/to/omp-bilingual
 
 - 工具跑完后 host 会重建 transcript，**工具前的 thinking 译文可能被拆掉**。
 - 终局回复已经是中文时，不显示对照。
-- Google 免费接口非正式产品 API，可能限流或抽风。段落最多 4 路并行；新提示会 abort 上一回合还在飞的翻译。
+- Google 免费接口非正式产品 API，可能限流或抽风。段落全并行；新提示会 abort 上一回合还在飞的翻译。
+
 
 
 ## 发布

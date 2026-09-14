@@ -2,10 +2,12 @@ import type { ExtensionAPI, ExtensionUIContext } from "@oh-my-pi/pi-coding-agent
 import { loadTranslationCache, saveTranslationCache, translationKey } from "./cache.ts";
 import { loadConfig, patchConfig } from "./config.ts";
 import { runConfigure } from "./configure.ts";
-import { extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
+import { attachAdvisorCards, decorateAdvisorCard, isAdvisorMessage, type AdvisorCard } from "./advisor-attach.ts";
+import { extractAdvisorParagraphs, extractSourceParagraphs, findLastTranslatableAssistant, isChinesePrompt, isEnglishPrompt, partitionTranslatableParagraphs } from "./extract.ts";
 import { EnglishReviewView, PromptCoachView, TextCardView, TextTranslationView, ThinkingTranslationView, type ThemeLike } from "./render.ts";
 import { asUpdateContentHost, contentHost, ensureTrailingView, extractAssistantText, installUpdateContentHook, removeTrailingView, themeFromModule } from "./text-attach.ts";
 import { attachThinkingTranslation, bindThinkingRefresh, joinCachedZh, uniqueParagraphs } from "./thinking-refresh.ts";
+
 import {
   backendChain,
   coachChinesePrompt,
@@ -532,6 +534,81 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     }
   };
 
+  const bindAdvisorCard = (card: AdvisorCard, message: { role?: string; customType?: string; details?: unknown }) => {
+    if (!configReady || !liveConfig.enabled || !liveConfig.translateText) return;
+    const theme = inlineTheme ?? (ui && isThemeLike(ui.theme) ? ui.theme : undefined);
+    if (!theme) return;
+    const paras = uniqueParagraphs(extractAdvisorParagraphs(message));
+    if (paras.length === 0) return;
+    const view = new TextTranslationView(theme);
+    if (!decorateAdvisorCard(card, view)) return;
+    bindTextView(view, paras.join("\n\n"), paintInlineText);
+  };
+
+  const installAdvisorTranslate = async () => {
+    try {
+      // Host special-cases advisor cards before registerMessageRenderer; compiled omp may omit this subpath.
+      const mod = (await import("@oh-my-pi/pi-coding-agent/modes/components/chat-transcript-builder")) as {
+
+        ChatTranscriptBuilder?: {
+          prototype: {
+            append: (entries: Array<{ message?: { role?: string; customType?: string; details?: unknown } }>) => void;
+            rebuild: (entries: Array<{ message?: { role?: string; customType?: string; details?: unknown } }>) => void;
+            container: { children: unknown[] };
+          };
+        };
+      };
+      const Builder = mod.ChatTranscriptBuilder;
+      if (Builder?.prototype.append && Builder.prototype.rebuild) {
+        const origAppend = Builder.prototype.append;
+        Builder.prototype.append = function (this: { container: { children: unknown[] } }, entries) {
+          const before = this.container.children.length;
+          origAppend.call(this, entries);
+          attachAdvisorCards(this.container.children.slice(before), entries.map((e) => e.message ?? {}), bindAdvisorCard);
+        };
+        const origRebuild = Builder.prototype.rebuild;
+        Builder.prototype.rebuild = function (this: { container: { children: unknown[] } }, entries) {
+          origRebuild.call(this, entries);
+          attachAdvisorCards(this.container.children, entries.map((e) => e.message ?? {}), bindAdvisorCard);
+        };
+      }
+    } catch (err) {
+      pi.logger.error("bilingual advisor builder hook unavailable", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    try {
+      const mod = (await import("@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers")) as {
+        UiHelpers?: {
+          prototype: {
+            addMessageToChat: (message: { role?: string; customType?: string; details?: unknown }, options?: unknown) => unknown;
+            ctx: { chatContainer: { children: unknown[] } };
+          };
+        };
+      };
+      const Helpers = mod.UiHelpers;
+      if (Helpers?.prototype.addMessageToChat) {
+        const orig = Helpers.prototype.addMessageToChat;
+        Helpers.prototype.addMessageToChat = function (
+          this: { ctx: { chatContainer: { children: unknown[] } } },
+          message,
+          options,
+        ) {
+          const result = orig.call(this, message, options);
+          if (isAdvisorMessage(message)) {
+            const last = this.ctx.chatContainer.children.at(-1);
+            if (last && typeof last === "object" && "render" in last) bindAdvisorCard(last as AdvisorCard, message);
+          }
+          return result;
+        };
+      }
+    } catch (err) {
+      pi.logger.error("bilingual advisor ui hook unavailable", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   pi.registerAssistantThinkingRenderer((context, theme) => {
     inlineTheme = theme;
     if (!configReady || !liveConfig.enabled || !liveConfig.translateThinking) return undefined;
@@ -558,10 +635,16 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
   ) => {
     if (!liveConfig.enabled) return;
     const hit = findLastTranslatableAssistant(entries, isBilingualContextMessage);
-    if (!hit) return;
-    const texts = liveConfig.translateText ? hit.texts : [];
-    const thinking = liveConfig.translateThinking ? hit.thinking : [];
-    const paras = [...thinking, ...texts];
+    const advisorParas: string[] = [];
+    if (liveConfig.translateText) {
+      for (const entry of entries) {
+        if (!entry.message) continue;
+        for (const text of extractAdvisorParagraphs(entry.message)) advisorParas.push(text);
+      }
+    }
+    const texts = hit && liveConfig.translateText ? hit.texts : [];
+    const thinking = hit && liveConfig.translateThinking ? hit.thinking : [];
+    const paras = uniqueParagraphs([...thinking, ...texts, ...advisorParas]);
     if (paras.length === 0) return;
     void translateFresh(paras, () => {
       paintInlineText();
@@ -572,6 +655,7 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
       });
     });
   };
+
 
   pi.on("session_start", (_event, ctx) => {
     scheduleTimer = (fn, ms) => ctx.setTimeout(fn, ms);
@@ -604,8 +688,20 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
 
   pi.on("message_end", (event) => {
     if (!liveConfig.enabled) return;
+    if (isAdvisorMessage(event.message)) {
+      if (!liveConfig.translateText) return;
+      const paras = extractAdvisorParagraphs(event.message);
+      if (paras.length === 0) return;
+      void translateFresh(paras, paintInlineText).catch((err) => {
+        pi.logger.error("bilingual advisor translate failed", {
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+      return;
+    }
     if (event.message.role === "user") return;
     if (event.message.role !== "assistant") return;
+
     if (thinkingTimer != null) {
       cancelTimer?.(thinkingTimer);
       thinkingTimer = undefined;
@@ -683,7 +779,8 @@ export default function bilingual(pi: ExtensionAPI): Promise<void> {
     },
   });
 
-  return installInlineText();
+  return Promise.all([installInlineText(), installAdvisorTranslate()]).then(() => undefined);
+
 }
 
 
