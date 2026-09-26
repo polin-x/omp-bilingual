@@ -97,17 +97,17 @@ export function renderPairCard(details: BilingualDetails, theme: ThemeLike): Com
     const advisor = pair.kind === "advisor";
     const last = i === pairs.length - 1;
     const zh = `${pair.zh}${last ? translationSuffix(pair.alias, pair.delayMs) : ""}`;
-    if (pair.kind !== "think") {
+    if (pair.kind !== "think" && !advisor) {
       box.addChild(
         new Trimmed(
-          new Markdown(advisor ? `EN  ${pair.en}` : pair.en, 0, 0, mdTheme, {
+          new Markdown(pair.en, 0, 0, mdTheme, {
             color: (t) => theme.fg(thinking ? "thinkingText" : "dim", t),
             italic: thinking,
           }),
         ),
       );
     }
-    box.addChild(markedZh(advisor ? `中  ${zh}` : zh, theme, mdTheme));
+    box.addChild(markedZh(zh, theme, mdTheme));
     if (i < pairs.length - 1) box.addChild(new Spacer(1));
   }
 
