@@ -7,14 +7,14 @@ const REQUIRED = [
   "queueTextTranslate",
   "attachInlineText",
   "installInlineText",
-  "installAdvisorTranslate",
-  "bindAdvisorCard",
+  "postAdvisorTranslation",
   "reviewKeyOf",
   "paintReviews",
   "pairsFromCache",
   "runEnglishReview",
   "runPromptCoach",
 ];
+
 
 
 const ORDERED = ["flushThinkingTranslate", "paintReviews"];
@@ -49,15 +49,17 @@ test("bindTextView imports bindThinkingRefresh and joinCachedZh", async () => {
 });
 
 
-test("plugin never registers a context hook or sendMessage cards", async () => {
+test("plugin never registers a context hook or nextTurn cards", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
   expect(src).not.toContain('pi.on("context"');
-  expect(src).not.toContain("sendMessage");
   expect(src).not.toContain('deliverAs: "nextTurn"');
   expect(src).not.toContain("postTextCard");
   expect(src).toContain("void boot.then(");
   expect(src).not.toContain("await boot");
+  expect(src).toContain("pi.sendMessage({");
+  expect(src).toContain('kind: "advisor"');
 });
+
 
 test("before_agent_start inserts prompt cards into the transcript", async () => {
   const src = await Bun.file(new URL("./index.ts", import.meta.url)).text();
